@@ -1,0 +1,37 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "clipstakes",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-03-07",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"r2_buckets": [
+		{
+			"binding": "VIDEOS",
+			"bucket_name": "clipstakes-videos"
+		},
+		{
+			"bucket_name": "clipstakes-videos",
+			"binding": "clipstakes_videos"
+		}
+	],
+	"observability": {
+		"enabled": true,
+		"head_sampling_rate": 1
+	}
+	// Secrets (set via `wrangler secret put`):
+	// - DATABASE_URL: Neon Postgres connection string
+	// - SHOPIFY_WEBHOOK_SECRET: Shopify webhook HMAC secret
+	// - APNS_KEY_ID: APNs key ID
+	// - APNS_TEAM_ID: Apple Team ID
+	// - APNS_PRIVATE_KEY: APNs private key (base64)
+	// - WALLETWALLET_API_KEY: WalletWallet API key (server-side only)
+	// - WALLETWALLET_TEMPLATE_ID: WalletWallet pass template ID
+	// - WALLETWALLET_BASE_URL: WalletWallet API URL (optional, default https://api.walletwallet.dev)
+	// Optional legacy wallet endpoint secrets:
+	// - WALLET_PASS_TYPE_ID
+	// - WALLET_TEAM_ID
+	// - WALLET_CERT
+	// - WALLET_CERT_PASSWORD
+}

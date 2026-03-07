@@ -1,0 +1,25 @@
+{
+  "name": "hackcanada2026-backend",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy --minify",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "db:generate": "sqlc generate",
+    "test": "bun test tests/api.test.ts tests/lib.test.ts tests/db.test.ts",
+    "test:watch": "bun test --watch tests/api.test.ts tests/lib.test.ts tests/db.test.ts",
+    "test:integration": "bun test tests/integration.test.ts",
+    "test:all": "bun test tests/"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
+    "hono": "^4.12.5",
+    "jose": "^5.9.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241230.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^4.71.0"
+  }
+}
