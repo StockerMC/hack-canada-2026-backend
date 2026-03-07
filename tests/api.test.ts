@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
+import { generateKeyPairSync } from "node:crypto"
 import { clipsRoutes } from "../src/routes/clips"
 import { conversionsRoutes } from "../src/routes/conversions"
 import { receiptsRoutes } from "../src/routes/receipts"
@@ -267,8 +268,13 @@ describe("Wallet ledger API", () => {
     const env = createMockEnv({
       APNS_KEY_ID: "kid",
       APNS_TEAM_ID: "team",
-      APNS_PRIVATE_KEY:
-        "LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JR0hBZ0VBTUJNR0J5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEJHMHdhd0lCQVFRZ3ZtcGNTWWdSMlUwRDE4ZksKaFNvUUMrKzFSNUt5NmFWMTF2dlIra2J3WDAraFJBTkNBQVF1Skp0THpiM1kyY01IRGR0SDV1RmJSeHpNRHE4NwpOSjV6MEx5eUlVaGpqUFd3cjNraWNuZTd6dnF4TkhjZ2xzR0pXckd5TzZnSUtXQ283OWZMcUN5egotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0tCg==",
+      APNS_PRIVATE_KEY: btoa(
+        generateKeyPairSync("ec", {
+          namedCurve: "prime256v1",
+          publicKeyEncoding: { type: "spki", format: "pem" },
+          privateKeyEncoding: { type: "pkcs8", format: "pem" },
+        }).privateKey
+      ),
     })
 
     const { clipId } = await createClipWithReceipt(app, env, db, "device-push", "product-1")
