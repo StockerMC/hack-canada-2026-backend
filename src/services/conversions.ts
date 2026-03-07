@@ -1,9 +1,7 @@
 import type { Db } from "../db"
 import { notifyCreatorEarnings } from "../lib/push"
 import type { Env } from "../types"
-import { COUPON_VALUE_CENTS, type CouponResponse, RewardsService } from "./rewards"
-
-export const EARNINGS_PER_CONVERSION = 500
+import { REWARD_CENTS, RewardsService } from "./rewards"
 
 export type ProcessConversionResult =
   | { status: "clip_not_found" }
@@ -11,9 +9,16 @@ export type ProcessConversionResult =
       status: "ok"
       clip_id: string
       conversion_recorded: boolean
-      earnings_added: number
-      bonus_coupon_created: boolean
-      bonus_coupon: CouponResponse | null
+      reward_credited: boolean
+      credited_cents: number
+      balances: {
+        available_cents: number
+        available_display: string
+        lifetime_earned_cents: number
+        lifetime_earned_display: string
+      }
+      within_window: boolean
+      push_sent: boolean
     }
 
 export class ConversionService {
@@ -27,49 +32,47 @@ export class ConversionService {
     orderId: string,
     env: Env
   ): Promise<ProcessConversionResult> {
-    const clipWithUser = await this.db.getClipWithUser(clipId)
-    if (!clipWithUser) {
+    const result = await this.db.processConversionReward({
+      clip_id: clipId,
+      order_id: orderId,
+      reward_cents: REWARD_CENTS,
+    })
+
+    if (result.status === "clip_not_found") {
       return { status: "clip_not_found" }
     }
 
-    const result = await this.db.processConversionAndMaybeBonus({
-      order_id: orderId,
-      clip_id: clipId,
-      user_id: clipWithUser.creator_user_id,
-      earnings_cents: EARNINGS_PER_CONVERSION,
-      bonus_value_cents: COUPON_VALUE_CENTS,
-    })
-
+    let pushSent = false
     if (
       result.conversion_recorded &&
-      clipWithUser.push_token &&
+      result.within_window &&
+      result.push_token &&
       env.APNS_KEY_ID &&
       env.APNS_TEAM_ID &&
       env.APNS_PRIVATE_KEY
     ) {
-      await notifyCreatorEarnings(clipWithUser.push_token, EARNINGS_PER_CONVERSION, {
+      const pushResult = await notifyCreatorEarnings(result.push_token, REWARD_CENTS, {
         keyId: env.APNS_KEY_ID,
         teamId: env.APNS_TEAM_ID,
         privateKey: env.APNS_PRIVATE_KEY,
       })
+      pushSent = pushResult.success
     }
 
-    let bonusCoupon: CouponResponse | null = null
-    if (result.bonus_coupon_created && result.bonus_coupon) {
-      const synced = await this.rewardsService.syncBonusCoupon(
-        result.bonus_coupon,
-        clipWithUser.creator_user_id
-      )
-      bonusCoupon = this.rewardsService.formatCoupon(synced)
-    }
+    const wallet = await this.rewardsService.ensureWallet(result.creator_user_id)
+    await this.rewardsService.syncWalletPass(result.creator_user_id, wallet)
+
+    const balances = await this.rewardsService.getBalances(result.creator_user_id)
 
     return {
       status: "ok",
-      clip_id: clipId,
+      clip_id: result.clip_id,
       conversion_recorded: result.conversion_recorded,
-      earnings_added: result.conversion_recorded ? EARNINGS_PER_CONVERSION : 0,
-      bonus_coupon_created: result.bonus_coupon_created,
-      bonus_coupon: bonusCoupon,
+      reward_credited: result.reward_credited,
+      credited_cents: result.reward_credited ? REWARD_CENTS : 0,
+      balances,
+      within_window: result.within_window,
+      push_sent: pushSent,
     }
   }
 }

@@ -1,6 +1,6 @@
 # ClipStakes Backend
 
-Cloudflare Workers backend for clip attribution, coupon-first rewards, and WalletWallet pass sync.
+Cloudflare Workers backend for clip attribution with persistent wallet identity + reward ledger balances.
 
 ## Quick Start
 
@@ -16,7 +16,7 @@ bun run deploy
 Run tests:
 
 ```txt
-bun test tests/api.test.ts tests/lib.test.ts tests/db.test.ts
+bun run test
 ```
 
 ## Environment
@@ -27,31 +27,43 @@ Required:
 - `DATABASE_URL`
 - `SHOPIFY_WEBHOOK_SECRET`
 
-WalletWallet integration (optional, server-side only):
+Wallet pass provider (optional, server-side only):
 - `WALLETWALLET_API_KEY`
 - `WALLETWALLET_BASE_URL` (defaults to `https://api.walletwallet.dev`)
 - `WALLETWALLET_TEMPLATE_ID`
 
-If WalletWallet is unavailable, core clip creation and conversions still succeed and coupons are still returned with `wallet_pass_url: null`.
+If wallet pass sync fails, reward credits still succeed and `pass_url` remains `null`.
 
 ## Database Migration
 
-Apply:
+Apply migrations in order, including:
 
 ```txt
 sql/migrations/20260307_coupon_wallet.sql
+sql/migrations/20260307_wallet_ledger.sql
 ```
 
-This adds:
-- `coupons` for instant/bonus rewards
-- `conversion_events` for `order_id` idempotency
-- race-safe receipt clip usage fields (`receipts.clip_created`, `receipts.clip_id`, `clips.receipt_id`)
+The wallet-ledger migration adds:
+- `creator_wallets` (one wallet identity per user)
+- `conversions` (provider order dedupe)
+- `reward_transactions` (credits + debits ledger with idempotency key)
 
-## Route Notes
+## API Notes
 
-- `POST /clips` supports receipt-gated coupon issuance (and keeps legacy clip creation when `receipt_id` is omitted).
-- `POST /conversions` keeps Shopify HMAC verification.
-- `POST /conversions/dev` mirrors the same attribution + bonus logic without Shopify signature checks.
-- `GET /rewards/me` returns coupon list + totals for the `X-Device-ID` user.
-- `POST /coupons/redeem` redeems one coupon code.
-- Both `POST /upload` and `POST /upload-url` are supported aliases.
+Device identity is anonymous via request header:
+
+```http
+X-Device-ID: <stable-device-id>
+```
+
+Primary reward flow:
+- `POST /clips` creates the clip and credits `clip_published` (+500 cents).
+- `POST /conversions` and `POST /conversions/dev` credit every unique conversion (+500 cents) even after 8 hours.
+- 8-hour window controls push urgency only (`push.within_window`), not reward eligibility.
+- `GET /rewards/me` returns wallet identity, balances, and recent ledger transactions.
+- `POST /wallet/redeem` debits balance for cashier/POS redemption.
+- `GET /wallet/:wallet_code/balance` supports scanner-side balance lookup.
+
+Compatibility:
+- `POST /upload` and `POST /upload-url` are both supported.
+- Legacy coupon route `/coupons/redeem` remains available for previously issued coupons.

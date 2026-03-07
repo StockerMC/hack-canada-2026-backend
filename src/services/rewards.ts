@@ -1,56 +1,68 @@
-import type {
-  Clip,
-  Coupon,
-  CouponType,
-  CreateClipWithReceiptInput,
-  CreateClipWithReceiptResult,
-  Db,
-} from "../db"
+import type { CreatorWallet, Db, RewardBalances, RewardTransaction, RewardTransactionType } from "../db"
 import { WalletWalletService } from "./walletwallet"
 
-export const COUPON_VALUE_CENTS = 500
+export const REWARD_CENTS = 500
 
-export type CouponResponse = {
-  code: string
-  value_cents: number
-  value_display: string
-  type: CouponType
-  source_clip_id: string | null
-  created_at: Date
-  expires_at: Date | null
-  redeemed: boolean
-  wallet_pass_url: string | null
+export type WalletResponse = {
+  wallet_code: string
+  pass_url: string | null
+  qr_payload: string
 }
 
-export type RewardTotalsResponse = {
+export type BalancesResponse = {
   available_cents: number
   available_display: string
+  lifetime_earned_cents: number
+  lifetime_earned_display: string
 }
 
-export type CreateClipRewardResult =
-  | { status: "receipt_not_found" | "receipt_already_used" | "product_not_in_receipt" }
-  | {
-      status: "created"
-      clip: Clip
-      instantCoupon: Coupon
-      totals: RewardTotalsResponse
-    }
+export type RewardResponse = {
+  credited_cents: number
+  credited_display: string
+  reason: Exclude<RewardTransactionType, "wallet_redeem">
+}
+
+export type RewardTransactionResponse = {
+  id: string
+  type: RewardTransactionType
+  amount_cents: number
+  amount_display: string
+  clip_id: string | null
+  order_id: string | null
+  created_at: Date
+}
 
 function formatCents(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`
+  const abs = (Math.abs(cents) / 100).toFixed(2)
+  return cents < 0 ? `-$${abs}` : `$${abs}`
 }
 
-function mapCoupon(coupon: Coupon): CouponResponse {
+function mapWallet(wallet: CreatorWallet): WalletResponse {
   return {
-    code: coupon.code,
-    value_cents: coupon.value_cents,
-    value_display: formatCents(coupon.value_cents),
-    type: coupon.type,
-    source_clip_id: coupon.clip_id,
-    created_at: coupon.created_at,
-    expires_at: coupon.expires_at,
-    redeemed: coupon.redeemed,
-    wallet_pass_url: coupon.wallet_pass_url,
+    wallet_code: wallet.wallet_code,
+    pass_url: wallet.pass_url,
+    qr_payload: wallet.qr_payload,
+  }
+}
+
+function mapBalances(balances: RewardBalances): BalancesResponse {
+  return {
+    available_cents: balances.available_cents,
+    available_display: formatCents(balances.available_cents),
+    lifetime_earned_cents: balances.lifetime_earned_cents,
+    lifetime_earned_display: formatCents(balances.lifetime_earned_cents),
+  }
+}
+
+function mapTransaction(tx: RewardTransaction): RewardTransactionResponse {
+  return {
+    id: tx.id,
+    type: tx.type,
+    amount_cents: tx.amount_cents,
+    amount_display: formatCents(tx.amount_cents),
+    clip_id: tx.clip_id,
+    order_id: tx.order_id,
+    created_at: tx.created_at,
   }
 }
 
@@ -60,99 +72,77 @@ export class RewardsService {
     private readonly walletWalletService: WalletWalletService
   ) {}
 
-  private async syncWalletPass(coupon: Coupon, userId: string): Promise<Coupon> {
-    if (coupon.wallet_pass_url) {
-      return coupon
+  formatReward(creditedCents: number, reason: Exclude<RewardTransactionType, "wallet_redeem">): RewardResponse {
+    return {
+      credited_cents: creditedCents,
+      credited_display: formatCents(creditedCents),
+      reason,
     }
+  }
 
-    const walletPassUrl = await this.walletWalletService.createPassForCoupon({
-      coupon,
+  async ensureWallet(userId: string): Promise<CreatorWallet> {
+    return this.db.ensureCreatorWallet(userId)
+  }
+
+  async getBalances(userId: string): Promise<BalancesResponse> {
+    const balances = await this.db.getRewardBalances(userId)
+    return mapBalances(balances)
+  }
+
+  async getTransactions(userId: string, limit = 20): Promise<RewardTransactionResponse[]> {
+    const transactions = await this.db.getRewardTransactionsByUserId(userId, limit)
+    return transactions.map(mapTransaction)
+  }
+
+  async syncWalletPass(userId: string, wallet: CreatorWallet): Promise<CreatorWallet> {
+    const balances = await this.db.getRewardBalances(userId)
+
+    const passUrl = await this.walletWalletService.createOrUpdatePassForWallet({
+      walletCode: wallet.wallet_code,
+      qrPayload: wallet.qr_payload,
       userId,
+      balanceCents: balances.available_cents,
+      existingPassUrl: wallet.pass_url,
     })
 
-    if (!walletPassUrl) {
-      return coupon
+    if (!passUrl || passUrl === wallet.pass_url) {
+      return wallet
     }
 
-    const updated = await this.db.updateCouponWalletPassUrl(coupon.id, walletPassUrl)
-    return updated ?? { ...coupon, wallet_pass_url: walletPassUrl }
+    const updated = await this.db.updateCreatorWalletPassUrl(wallet.id, passUrl)
+    return updated ?? { ...wallet, pass_url: passUrl }
   }
 
-  async createClipAndInstantCoupon(input: CreateClipWithReceiptInput): Promise<CreateClipRewardResult> {
-    const result: CreateClipWithReceiptResult = await this.db.createClipWithReceiptAndInstantCoupon(input)
-    if (result.status !== "created") {
-      return result
-    }
-
-    const syncedCoupon = await this.syncWalletPass(result.coupon, input.user_id)
-    const totals = await this.getTotals(input.user_id)
+  async getWalletAndBalances(userId: string): Promise<{
+    wallet: WalletResponse
+    balances: BalancesResponse
+  }> {
+    const wallet = await this.ensureWallet(userId)
+    const syncedWallet = await this.syncWalletPass(userId, wallet)
+    const balances = await this.getBalances(userId)
 
     return {
-      status: "created",
-      clip: result.clip,
-      instantCoupon: syncedCoupon,
-      totals,
+      wallet: mapWallet(syncedWallet),
+      balances,
     }
   }
 
-  async syncBonusCoupon(coupon: Coupon, userId: string): Promise<Coupon> {
-    return this.syncWalletPass(coupon, userId)
-  }
-
-  async getTotals(userId: string): Promise<RewardTotalsResponse> {
-    const totals = await this.db.getAvailableCouponTotals(userId)
-    return {
-      available_cents: totals.available_cents,
-      available_display: formatCents(totals.available_cents),
-    }
-  }
-
-  async getRewards(userId: string): Promise<{ coupons: CouponResponse[]; totals: RewardTotalsResponse }> {
-    const [coupons, totals] = await Promise.all([
-      this.db.getCouponsByUserId(userId),
-      this.getTotals(userId),
+  async getWalletSummary(userId: string, transactionLimit = 20): Promise<{
+    wallet: WalletResponse
+    balances: BalancesResponse
+    transactions: RewardTransactionResponse[]
+  }> {
+    const wallet = await this.ensureWallet(userId)
+    const syncedWallet = await this.syncWalletPass(userId, wallet)
+    const [balances, transactions] = await Promise.all([
+      this.getBalances(userId),
+      this.getTransactions(userId, transactionLimit),
     ])
 
     return {
-      coupons: coupons.map(mapCoupon),
-      totals,
+      wallet: mapWallet(syncedWallet),
+      balances,
+      transactions,
     }
-  }
-
-  async redeemCoupon(
-    userId: string,
-    code: string
-  ): Promise<
-    | { status: "not_found" }
-    | { status: "already_redeemed" }
-    | { status: "expired" }
-    | { status: "redeemed"; coupon: CouponResponse; totals: RewardTotalsResponse }
-  > {
-    const existing = await this.db.getCouponByCode(userId, code)
-    if (!existing) {
-      return { status: "not_found" }
-    }
-    if (existing.redeemed) {
-      return { status: "already_redeemed" }
-    }
-    if (existing.expires_at && new Date(existing.expires_at).getTime() <= Date.now()) {
-      return { status: "expired" }
-    }
-
-    const redeemed = await this.db.redeemCouponByCode(userId, code)
-    if (!redeemed) {
-      return { status: "already_redeemed" }
-    }
-
-    const totals = await this.getTotals(userId)
-    return {
-      status: "redeemed",
-      coupon: mapCoupon(redeemed),
-      totals,
-    }
-  }
-
-  formatCoupon(coupon: Coupon): CouponResponse {
-    return mapCoupon(coupon)
   }
 }

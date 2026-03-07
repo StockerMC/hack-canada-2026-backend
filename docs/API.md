@@ -4,7 +4,7 @@ Base URL: `https://clipstakes.<your-worker>.workers.dev`
 
 ## Authentication
 
-Creator endpoints use anonymous device auth:
+Creator identity is anonymous and required on creator-facing routes:
 
 ```http
 X-Device-ID: <ios-identifierForVendor>
@@ -18,13 +18,9 @@ GET /
 
 ## Clips
 
-### `GET /clips/:productId`
-
-Returns up to 20 clips ranked by `conversions`.
-
 ### `POST /clips`
 
-Creates a clip. Coupon-first flow is enabled when `receipt_id` is supplied.
+Creates a clip, attributes it to the `X-Device-ID` creator, and credits +500 cents.
 
 Request:
 
@@ -51,18 +47,21 @@ Response (`201`):
     "conversions": 0,
     "created_at": "2026-03-07T12:00:00Z"
   },
-  "instant_coupon": {
-    "code": "CLIP-...",
-    "value_cents": 500,
-    "value_display": "$5.00",
-    "type": "instant",
-    "expires_at": null,
-    "redeemed": false,
-    "wallet_pass_url": null
+  "reward": {
+    "credited_cents": 500,
+    "credited_display": "$5.00",
+    "reason": "clip_published"
   },
-  "totals": {
+  "wallet": {
+    "wallet_code": "CLIP-...",
+    "pass_url": null,
+    "qr_payload": "CLIP-..."
+  },
+  "balances": {
     "available_cents": 500,
-    "available_display": "$5.00"
+    "available_display": "$5.00",
+    "lifetime_earned_cents": 500,
+    "lifetime_earned_display": "$5.00"
   }
 }
 ```
@@ -72,23 +71,9 @@ Errors:
 - `409` receipt already used
 - `400` validation/product mismatch
 
-Notes:
-- Legacy clip creation remains supported when `receipt_id` is omitted.
-- Clip creation never fails due to WalletWallet outage/quota issues.
+### `GET /clips/:productId`
 
-## Receipts
-
-### `GET /receipt/:id`
-
-```json
-{
-  "id": "uuid",
-  "product_ids": ["product-1"],
-  "used_for_conversions": true,
-  "clip_created": true,
-  "created_at": "2026-03-07T12:00:00Z"
-}
-```
+Returns up to 20 clips ranked by `conversions`.
 
 ## Conversions
 
@@ -97,10 +82,11 @@ Notes:
 Shopify webhook endpoint. Requires valid `X-Shopify-Hmac-Sha256`.
 
 Behavior:
-- Extracts `clip_id` from `note_attributes`
-- Dedupes by order id
-- Applies conversion attribution
-- Creates one bonus coupon (`$5`) only on the first conversion for a clip
+- Extracts `clip_id` from Shopify `note_attributes`
+- Dedupes by provider `order_id`
+- Credits +500 on each unique conversion
+- Credits still apply after 8 hours
+- Push urgency only inside the 8-hour window
 
 Response:
 
@@ -109,25 +95,25 @@ Response:
   "success": true,
   "attributed": true,
   "clip_id": "uuid",
-  "earnings_added": 500,
-  "bonus_coupon_created": true,
-  "bonus_coupon": {
-    "code": "BONUS-...",
-    "value_cents": 500,
-    "value_display": "$5.00",
-    "type": "bonus",
-    "source_clip_id": "uuid",
-    "created_at": "2026-03-07T12:00:00Z",
-    "expires_at": null,
-    "redeemed": false,
-    "wallet_pass_url": null
+  "reward": {
+    "credited_cents": 500,
+    "credited_display": "$5.00",
+    "reason": "conversion"
+  },
+  "balances": {
+    "available_cents": 1000,
+    "available_display": "$10.00"
+  },
+  "push": {
+    "sent": true,
+    "within_window": true
   }
 }
 ```
 
 ### `POST /conversions/dev`
 
-No Shopify signature required. Uses the same attribution logic as `/conversions`.
+Same attribution + idempotency + credit logic as `/conversions`, but no Shopify signature.
 
 Request:
 
@@ -138,54 +124,52 @@ Request:
 }
 ```
 
-Response:
-
-```json
-{
-  "success": true,
-  "attributed": true,
-  "clip_id": "uuid",
-  "bonus_coupon_created": true
-}
-```
-
 ## Rewards
 
 ### `GET /rewards/me`
 
-Returns coupons + available totals for the `X-Device-ID` user.
+Returns wallet identity, balances, and recent ledger transactions for `X-Device-ID`.
 
 ```json
 {
-  "coupons": [
+  "wallet": {
+    "wallet_code": "CLIP-...",
+    "pass_url": "https://...pkpass",
+    "qr_payload": "CLIP-..."
+  },
+  "balances": {
+    "available_cents": 2500,
+    "available_display": "$25.00",
+    "lifetime_earned_cents": 2500,
+    "lifetime_earned_display": "$25.00"
+  },
+  "transactions": [
     {
-      "code": "CLIP-...",
-      "value_cents": 500,
-      "value_display": "$5.00",
-      "type": "instant",
-      "source_clip_id": "uuid",
-      "created_at": "2026-03-07T12:00:00Z",
-      "expires_at": null,
-      "redeemed": false,
-      "wallet_pass_url": null
+      "id": "uuid",
+      "type": "conversion",
+      "amount_cents": 500,
+      "amount_display": "$5.00",
+      "clip_id": "uuid",
+      "order_id": "order-123",
+      "created_at": "2026-03-07T12:00:00Z"
     }
-  ],
-  "totals": {
-    "available_cents": 500,
-    "available_display": "$5.00"
-  }
+  ]
 }
 ```
 
-## Coupons
+## Wallet / Redemption
 
-### `POST /coupons/redeem`
+### `POST /wallet/redeem`
+
+Cashier/POS redemption using stable wallet QR code.
 
 Request:
 
 ```json
 {
-  "code": "CLIP-..."
+  "wallet_code": "CLIP-...",
+  "amount_cents": 1200,
+  "order_id": "pos-123"
 }
 ```
 
@@ -193,27 +177,33 @@ Response:
 
 ```json
 {
-  "coupon": {
-    "code": "CLIP-...",
-    "value_cents": 500,
-    "value_display": "$5.00",
-    "type": "instant",
-    "source_clip_id": "uuid",
-    "created_at": "2026-03-07T12:00:00Z",
-    "expires_at": null,
-    "redeemed": true,
-    "wallet_pass_url": null
+  "success": true,
+  "wallet": {
+    "wallet_code": "CLIP-...",
+    "pass_url": "https://...pkpass",
+    "qr_payload": "CLIP-..."
   },
-  "totals": {
-    "available_cents": 0,
-    "available_display": "$0.00"
+  "redemption": {
+    "order_id": "pos-123",
+    "amount_cents": 1200,
+    "amount_display": "$12.00"
+  },
+  "balances": {
+    "available_cents": 1300,
+    "available_display": "$13.00",
+    "lifetime_earned_cents": 2500,
+    "lifetime_earned_display": "$25.00"
   }
 }
 ```
 
 Errors:
-- `404` coupon not found
-- `409` already redeemed/expired
+- `404` wallet not found
+- `409` insufficient balance
+
+### `GET /wallet/:wallet_code/balance`
+
+Scanner-friendly wallet balance lookup.
 
 ## Uploads
 
@@ -222,3 +212,7 @@ Both aliases are supported:
 - `POST /upload-url`
 
 Both return the same payload with `upload_url`, `video_id`, `key`, and `video_url`.
+
+## Legacy Coupon Compatibility
+
+`POST /coupons/redeem` remains available for previously-issued coupons.

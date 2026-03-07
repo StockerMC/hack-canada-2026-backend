@@ -2,8 +2,8 @@ import { Hono } from "hono"
 import { z } from "zod"
 import type { Env } from "../types"
 import type { Db } from "../db"
+import { REWARD_CENTS, RewardsService } from "../services/rewards"
 import { WalletWalletService } from "../services/walletwallet"
-import { COUPON_VALUE_CENTS, RewardsService } from "../services/rewards"
 
 const createClipSchema = z.object({
   receipt_id: z.string().min(1).optional(),
@@ -17,7 +17,6 @@ const createClipSchema = z.object({
 export function clipsRoutes(db: Db) {
   const app = new Hono<{ Bindings: Env }>()
 
-  // GET /clips/:productId - Get clips for a product (ranked by conversions)
   app.get("/:productId", async (c) => {
     const productId = c.req.param("productId")
     const clips = await db.getClipsByProductId(productId)
@@ -32,7 +31,6 @@ export function clipsRoutes(db: Db) {
     })
   })
 
-  // POST /clips - Create a new clip
   app.post("/", async (c) => {
     const deviceId = c.req.header("X-Device-ID")
     if (!deviceId) {
@@ -51,7 +49,6 @@ export function clipsRoutes(db: Db) {
       return c.json({ error: "Invalid request", details: parsed.error.flatten() }, 400)
     }
 
-    // Get or create user
     let user = await db.getUserByDeviceId(deviceId)
     if (!user) {
       user = await db.createUser(deviceId, null)
@@ -60,7 +57,7 @@ export function clipsRoutes(db: Db) {
     const rewardsService = new RewardsService(db, new WalletWalletService(c.env))
 
     if (parsed.data.receipt_id) {
-      const result = await rewardsService.createClipAndInstantCoupon({
+      const result = await db.createClipWithReceiptAndReward({
         user_id: user.id,
         receipt_id: parsed.data.receipt_id,
         product_id: parsed.data.product_id,
@@ -68,7 +65,7 @@ export function clipsRoutes(db: Db) {
         text_overlay: parsed.data.text_overlay ?? null,
         text_position: parsed.data.text_position ?? null,
         duration_seconds: parsed.data.duration_seconds ?? null,
-        instant_value_cents: COUPON_VALUE_CENTS,
+        reward_cents: REWARD_CENTS,
       })
 
       if (result.status === "receipt_not_found") {
@@ -80,39 +77,54 @@ export function clipsRoutes(db: Db) {
       if (result.status === "product_not_in_receipt") {
         return c.json({ error: "product_id is not present on receipt" }, 400)
       }
-
       if (result.status !== "created") {
         return c.json({ error: "Failed to create clip" }, 500)
       }
 
-      const instantCoupon = rewardsService.formatCoupon(result.instantCoupon)
+      const { wallet, balances } = await rewardsService.getWalletAndBalances(user.id)
 
       return c.json(
         {
           clip: result.clip,
-          instant_coupon: {
-            code: instantCoupon.code,
-            value_cents: instantCoupon.value_cents,
-            value_display: instantCoupon.value_display,
-            type: instantCoupon.type,
-            expires_at: instantCoupon.expires_at,
-            redeemed: instantCoupon.redeemed,
-            wallet_pass_url: instantCoupon.wallet_pass_url,
+          reward: rewardsService.formatReward(REWARD_CENTS, "clip_published"),
+          wallet,
+          balances,
+          totals: {
+            available_cents: balances.available_cents,
+            available_display: balances.available_display,
           },
-          totals: result.totals,
+          instant_coupon: null,
         },
         201
       )
     }
 
-    // Legacy path kept for backwards compatibility with older clients.
-    const clip = await db.createClip(user.id, parsed.data.product_id, parsed.data.video_url, {
+    const created = await db.createClipAndReward({
+      user_id: user.id,
+      product_id: parsed.data.product_id,
+      video_url: parsed.data.video_url,
       text_overlay: parsed.data.text_overlay ?? null,
       text_position: parsed.data.text_position ?? null,
       duration_seconds: parsed.data.duration_seconds ?? null,
+      reward_cents: REWARD_CENTS,
     })
 
-    return c.json({ clip }, 201)
+    const { wallet, balances } = await rewardsService.getWalletAndBalances(user.id)
+
+    return c.json(
+      {
+        clip: created.clip,
+        reward: rewardsService.formatReward(REWARD_CENTS, "clip_published"),
+        wallet,
+        balances,
+        totals: {
+          available_cents: balances.available_cents,
+          available_display: balances.available_display,
+        },
+        instant_coupon: null,
+      },
+      201
+    )
   })
 
   return app

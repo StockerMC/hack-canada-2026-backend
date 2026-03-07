@@ -3,7 +3,7 @@ import { z } from "zod"
 import type { Env } from "../types"
 import type { Db } from "../db"
 import { verifyShopifyWebhook, extractClipAttribution, type ShopifyOrder } from "../lib/shopify"
-import { ConversionService } from "../services/conversions"
+import { ConversionService, type ProcessConversionResult } from "../services/conversions"
 import { RewardsService } from "../services/rewards"
 import { WalletWalletService } from "../services/walletwallet"
 
@@ -18,15 +18,42 @@ function extractOrderId(order: ShopifyOrder): string | null {
   return null
 }
 
-function getConversionService(db: Db, env: Env): ConversionService {
+function getServices(db: Db, env: Env): { conversionService: ConversionService; rewardsService: RewardsService } {
   const rewardsService = new RewardsService(db, new WalletWalletService(env))
-  return new ConversionService(db, rewardsService)
+  return {
+    rewardsService,
+    conversionService: new ConversionService(db, rewardsService),
+  }
+}
+
+function conversionResponse(
+  result: Extract<ProcessConversionResult, { status: "ok" }>,
+  rewardsService: RewardsService
+) {
+  return {
+    success: true,
+    attributed: true,
+    clip_id: result.clip_id,
+    reward: rewardsService.formatReward(result.credited_cents, "conversion"),
+    balances: {
+      available_cents: result.balances.available_cents,
+      available_display: result.balances.available_display,
+      lifetime_earned_cents: result.balances.lifetime_earned_cents,
+      lifetime_earned_display: result.balances.lifetime_earned_display,
+    },
+    push: {
+      sent: result.push_sent,
+      within_window: result.within_window,
+    },
+    conversion_recorded: result.conversion_recorded,
+    earnings_added: result.credited_cents,
+    bonus_coupon_created: false,
+  }
 }
 
 export function conversionsRoutes(db: Db) {
   const app = new Hono<{ Bindings: Env }>()
 
-  // POST /conversions - Shopify webhook for order creation
   app.post("/", async (c) => {
     const signature = c.req.header("X-Shopify-Hmac-Sha256")
     if (!signature) {
@@ -56,23 +83,16 @@ export function conversionsRoutes(db: Db) {
       return c.json({ error: "Missing order id in webhook payload" }, 400)
     }
 
-    const conversionService = getConversionService(db, c.env)
+    const { conversionService, rewardsService } = getServices(db, c.env)
     const result = await conversionService.processConversionForClip(clipId, orderId, c.env)
+
     if (result.status === "clip_not_found") {
       return c.json({ error: "Clip not found" }, 404)
     }
 
-    return c.json({
-      success: true,
-      attributed: true,
-      clip_id: result.clip_id,
-      earnings_added: result.earnings_added,
-      bonus_coupon_created: result.bonus_coupon_created,
-      bonus_coupon: result.bonus_coupon ?? undefined,
-    })
+    return c.json(conversionResponse(result, rewardsService))
   })
 
-  // POST /conversions/dev - Dev endpoint without Shopify webhook signature verification
   app.post("/dev", async (c) => {
     let body: unknown
     try {
@@ -86,23 +106,18 @@ export function conversionsRoutes(db: Db) {
       return c.json({ error: "Invalid request", details: parsed.error.flatten() }, 400)
     }
 
-    const conversionService = getConversionService(db, c.env)
+    const { conversionService, rewardsService } = getServices(db, c.env)
     const result = await conversionService.processConversionForClip(
       parsed.data.clip_id,
       parsed.data.order_id,
       c.env
     )
+
     if (result.status === "clip_not_found") {
       return c.json({ error: "Clip not found" }, 404)
     }
 
-    return c.json({
-      success: true,
-      attributed: true,
-      clip_id: result.clip_id,
-      bonus_coupon_created: result.bonus_coupon_created,
-      bonus_coupon: result.bonus_coupon ?? undefined,
-    })
+    return c.json(conversionResponse(result, rewardsService))
   })
 
   return app

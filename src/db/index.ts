@@ -46,6 +46,34 @@ export type Coupon = {
   wallet_pass_url: string | null
 }
 
+export type CreatorWallet = {
+  id: string
+  user_id: string
+  wallet_code: string
+  pass_url: string | null
+  qr_payload: string
+  created_at: Date
+}
+
+export type RewardTransactionType = "clip_published" | "conversion" | "wallet_redeem"
+
+export type RewardTransaction = {
+  id: string
+  user_id: string
+  clip_id: string | null
+  conversion_id: string | null
+  order_id: string | null
+  type: RewardTransactionType
+  amount_cents: number
+  created_at: Date
+  idempotency_key: string
+}
+
+export type RewardBalances = {
+  available_cents: number
+  lifetime_earned_cents: number
+}
+
 export type ClipWithCreator = Clip & {
   creator_device_id: string
 }
@@ -63,26 +91,76 @@ export type CreateClipWithReceiptInput = {
   text_overlay?: string | null
   text_position?: string | null
   duration_seconds?: number | null
-  instant_value_cents: number
+  reward_cents: number
 }
 
 export type CreateClipWithReceiptResult =
   | { status: "receipt_not_found" | "receipt_already_used" | "product_not_in_receipt" }
-  | { status: "created"; clip: Clip; coupon: Coupon }
+  | {
+      status: "created"
+      clip: Clip
+      reward_transaction: RewardTransaction
+    }
+
+export type CreateClipAndRewardInput = {
+  user_id: string
+  product_id: string
+  video_url: string
+  text_overlay?: string | null
+  text_position?: string | null
+  duration_seconds?: number | null
+  reward_cents: number
+}
+
+export type CreateClipAndRewardResult = {
+  clip: Clip
+  reward_transaction: RewardTransaction
+}
 
 export type ProcessConversionInput = {
   order_id: string
   clip_id: string
-  user_id: string
-  earnings_cents: number
-  bonus_value_cents: number
+  reward_cents: number
 }
 
-export type ProcessConversionResult = {
-  conversion_recorded: boolean
-  bonus_coupon_created: boolean
-  bonus_coupon: Coupon | null
+export type ProcessConversionResult =
+  | { status: "clip_not_found" }
+  | {
+      status: "ok"
+      clip_id: string
+      creator_user_id: string
+      push_token: string | null
+      conversion_recorded: boolean
+      reward_credited: boolean
+      reward_transaction: RewardTransaction | null
+      within_window: boolean
+    }
+
+export type RedeemWalletInput = {
+  wallet_code: string
+  amount_cents: number
+  order_id: string
 }
+
+export type RedeemWalletResult =
+  | { status: "wallet_not_found" }
+  | {
+      status: "insufficient_balance"
+      wallet: CreatorWallet
+      available_cents: number
+    }
+  | {
+      status: "already_processed"
+      wallet: CreatorWallet
+      reward_transaction: RewardTransaction
+      balances: RewardBalances
+    }
+  | {
+      status: "redeemed"
+      wallet: CreatorWallet
+      reward_transaction: RewardTransaction
+      balances: RewardBalances
+    }
 
 function parseJsonRow<T>(value: unknown): T | null {
   if (!value) return null
@@ -92,12 +170,37 @@ function parseJsonRow<T>(value: unknown): T | null {
   return value as T
 }
 
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { code?: unknown }).code === "string" &&
+    (error as { code: string }).code === "23505"
+  )
+}
+
+function generateWalletCode(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+  let suffix = ""
+  for (let i = 0; i < 8; i += 1) {
+    const index = Math.floor(Math.random() * alphabet.length)
+    suffix += alphabet[index]
+  }
+  return `CLIP-${suffix}`
+}
+
+function walletRedeemIdempotencyKey(walletCode: string, orderId: string): string {
+  return `wallet_redeem:${walletCode}:${orderId}`
+}
+
 export interface Db {
   getUserByDeviceId(deviceId: string): Promise<User | null>
   createUser(deviceId: string, pushToken: string | null): Promise<User>
   updateUserPushToken(userId: string, pushToken: string): Promise<void>
   updateUserEarnings(userId: string, amount: number): Promise<void>
   getUserEarnings(userId: string): Promise<{ id: string; earnings: number } | null>
+
   getClipsByProductId(productId: string): Promise<ClipWithCreator[]>
   getClipById(clipId: string): Promise<Clip | null>
   createClip(
@@ -110,15 +213,26 @@ export interface Db {
       duration_seconds?: number | null
     }
   ): Promise<Clip>
-  createClipWithReceiptAndInstantCoupon(
-    input: CreateClipWithReceiptInput
-  ): Promise<CreateClipWithReceiptResult>
+  createClipWithReceiptAndReward(input: CreateClipWithReceiptInput): Promise<CreateClipWithReceiptResult>
+  createClipAndReward(input: CreateClipAndRewardInput): Promise<CreateClipAndRewardResult>
   incrementClipConversions(clipId: string): Promise<void>
   getClipWithUser(clipId: string): Promise<ClipWithUser | null>
+
   getReceiptById(receiptId: string): Promise<Receipt | null>
   createReceipt(productIds: string[]): Promise<Receipt>
   markReceiptUsed(receiptId: string): Promise<void>
-  processConversionAndMaybeBonus(input: ProcessConversionInput): Promise<ProcessConversionResult>
+
+  processConversionReward(input: ProcessConversionInput): Promise<ProcessConversionResult>
+
+  ensureCreatorWallet(userId: string): Promise<CreatorWallet>
+  getCreatorWalletByUserId(userId: string): Promise<CreatorWallet | null>
+  getCreatorWalletByCode(walletCode: string): Promise<CreatorWallet | null>
+  updateCreatorWalletPassUrl(walletId: string, passUrl: string): Promise<CreatorWallet | null>
+
+  getRewardBalances(userId: string): Promise<RewardBalances>
+  getRewardTransactionsByUserId(userId: string, limit?: number): Promise<RewardTransaction[]>
+  redeemWallet(input: RedeemWalletInput): Promise<RedeemWalletResult>
+
   getCouponsByUserId(userId: string): Promise<Coupon[]>
   getCouponByCode(userId: string, code: string): Promise<Coupon | null>
   redeemCouponByCode(userId: string, code: string): Promise<Coupon | null>
@@ -128,6 +242,22 @@ export interface Db {
 
 export function createDb(databaseUrl: string): Db {
   const sql = neon(databaseUrl)
+  const readRewardBalances = async (userId: string): Promise<RewardBalances> => {
+    const rows = await sql`
+      SELECT
+        COALESCE(SUM(amount_cents), 0)::INT AS available_cents,
+        COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0)::INT AS lifetime_earned_cents
+      FROM reward_transactions
+      WHERE user_id = ${userId}
+    `
+
+    return (
+      (rows[0] as RewardBalances) ?? {
+        available_cents: 0,
+        lifetime_earned_cents: 0,
+      }
+    )
+  }
 
   return {
     async getUserByDeviceId(deviceId: string): Promise<User | null> {
@@ -199,7 +329,7 @@ export function createDb(databaseUrl: string): Db {
       return rows[0] as Clip
     },
 
-    async createClipWithReceiptAndInstantCoupon(
+    async createClipWithReceiptAndReward(
       input: CreateClipWithReceiptInput
     ): Promise<CreateClipWithReceiptResult> {
       const [rows] = await sql.transaction([
@@ -249,21 +379,33 @@ export function createDb(databaseUrl: string): Db {
             WHERE r.id = ${input.receipt_id}
             RETURNING r.id
           ),
-          inserted_coupon AS (
-            INSERT INTO coupons (user_id, clip_id, code, type, value_cents)
+          inserted_reward AS (
+            INSERT INTO reward_transactions (
+              user_id,
+              clip_id,
+              type,
+              amount_cents,
+              idempotency_key
+            )
             SELECT
               ${input.user_id},
               ic.id,
-              'CLIP-' || UPPER(REPLACE(ic.id::text, '-', '')),
-              'instant',
-              ${input.instant_value_cents}
+              'clip_published',
+              ${input.reward_cents},
+              'clip_published:' || ic.id::text
             FROM inserted_clip ic
             RETURNING *
+          ),
+          updated_user AS (
+            UPDATE users
+            SET earnings = earnings + ${input.reward_cents}
+            WHERE id IN (SELECT user_id FROM inserted_reward)
+            RETURNING id
           )
           SELECT
             (SELECT status FROM status_row) AS status,
             (SELECT row_to_json(ic) FROM inserted_clip ic LIMIT 1) AS clip,
-            (SELECT row_to_json(cp) FROM inserted_coupon cp LIMIT 1) AS coupon
+            (SELECT row_to_json(rt) FROM inserted_reward rt LIMIT 1) AS reward_transaction
         `,
       ])
 
@@ -271,7 +413,7 @@ export function createDb(databaseUrl: string): Db {
         | {
             status: "receipt_not_found" | "receipt_already_used" | "product_not_in_receipt" | "ok"
             clip: unknown
-            coupon: unknown
+            reward_transaction: unknown
           }
         | undefined
 
@@ -279,21 +421,96 @@ export function createDb(databaseUrl: string): Db {
         return { status: "receipt_not_found" }
       }
 
-      if (row.status === "receipt_not_found" || row.status === "receipt_already_used" || row.status === "product_not_in_receipt") {
+      if (
+        row.status === "receipt_not_found" ||
+        row.status === "receipt_already_used" ||
+        row.status === "product_not_in_receipt"
+      ) {
         return { status: row.status }
       }
 
       const clip = parseJsonRow<Clip>(row.clip)
-      const coupon = parseJsonRow<Coupon>(row.coupon)
+      const rewardTransaction = parseJsonRow<RewardTransaction>(row.reward_transaction)
 
-      if (!clip || !coupon) {
-        throw new Error("Failed to create clip and instant coupon transactionally")
+      if (!clip || !rewardTransaction) {
+        throw new Error("Failed to create clip and reward transactionally")
       }
 
       return {
         status: "created",
         clip,
-        coupon,
+        reward_transaction: rewardTransaction,
+      }
+    },
+
+    async createClipAndReward(input: CreateClipAndRewardInput): Promise<CreateClipAndRewardResult> {
+      const [rows] = await sql.transaction([
+        sql`
+          WITH inserted_clip AS (
+            INSERT INTO clips (
+              user_id,
+              product_id,
+              video_url,
+              text_overlay,
+              text_position,
+              duration_seconds
+            )
+            VALUES (
+              ${input.user_id},
+              ${input.product_id},
+              ${input.video_url},
+              ${input.text_overlay ?? null},
+              ${input.text_position ?? null},
+              ${input.duration_seconds ?? null}
+            )
+            RETURNING *
+          ),
+          inserted_reward AS (
+            INSERT INTO reward_transactions (
+              user_id,
+              clip_id,
+              type,
+              amount_cents,
+              idempotency_key
+            )
+            SELECT
+              ${input.user_id},
+              ic.id,
+              'clip_published',
+              ${input.reward_cents},
+              'clip_published:' || ic.id::text
+            FROM inserted_clip ic
+            RETURNING *
+          ),
+          updated_user AS (
+            UPDATE users
+            SET earnings = earnings + ${input.reward_cents}
+            WHERE id IN (SELECT user_id FROM inserted_reward)
+            RETURNING id
+          )
+          SELECT
+            (SELECT row_to_json(ic) FROM inserted_clip ic LIMIT 1) AS clip,
+            (SELECT row_to_json(rt) FROM inserted_reward rt LIMIT 1) AS reward_transaction
+        `,
+      ])
+
+      const row = rows[0] as
+        | {
+            clip: unknown
+            reward_transaction: unknown
+          }
+        | undefined
+
+      const clip = parseJsonRow<Clip>(row?.clip)
+      const rewardTransaction = parseJsonRow<RewardTransaction>(row?.reward_transaction)
+
+      if (!clip || !rewardTransaction) {
+        throw new Error("Failed to create clip and reward transactionally")
+      }
+
+      return {
+        clip,
+        reward_transaction: rewardTransaction,
       }
     },
 
@@ -329,14 +546,25 @@ export function createDb(databaseUrl: string): Db {
       await sql`UPDATE receipts SET used_for_conversions = TRUE WHERE id = ${receiptId}`
     },
 
-    async processConversionAndMaybeBonus(input: ProcessConversionInput): Promise<ProcessConversionResult> {
+    async processConversionReward(input: ProcessConversionInput): Promise<ProcessConversionResult> {
       const [rows] = await sql.transaction([
         sql`
-          WITH inserted_conversion AS (
-            INSERT INTO conversion_events (order_id, clip_id, user_id)
-            VALUES (${input.order_id}, ${input.clip_id}, ${input.user_id})
+          WITH clip_row AS (
+            SELECT
+              c.id AS clip_id,
+              c.user_id AS creator_user_id,
+              c.created_at AS clip_created_at,
+              u.push_token AS push_token
+            FROM clips c
+            JOIN users u ON c.user_id = u.id
+            WHERE c.id = ${input.clip_id}
+          ),
+          inserted_conversion AS (
+            INSERT INTO conversions (order_id, clip_id, user_id)
+            SELECT ${input.order_id}, clip_id, creator_user_id
+            FROM clip_row
             ON CONFLICT (order_id) DO NOTHING
-            RETURNING clip_id, user_id
+            RETURNING id, clip_id, user_id
           ),
           updated_clip AS (
             UPDATE clips
@@ -344,51 +572,301 @@ export function createDb(databaseUrl: string): Db {
             WHERE id IN (SELECT clip_id FROM inserted_conversion)
             RETURNING id
           ),
-          updated_user AS (
-            UPDATE users
-            SET earnings = earnings + ${input.earnings_cents}
-            WHERE id IN (SELECT user_id FROM inserted_conversion)
-            RETURNING id
-          ),
-          inserted_bonus AS (
-            INSERT INTO coupons (user_id, clip_id, code, type, value_cents)
-            SELECT
+          inserted_reward AS (
+            INSERT INTO reward_transactions (
               user_id,
               clip_id,
-              'BONUS-' || UPPER(REPLACE(clip_id::text, '-', '')),
-              'bonus',
-              ${input.bonus_value_cents}
-            FROM inserted_conversion
-            ON CONFLICT (clip_id) WHERE type = 'bonus' DO NOTHING
+              conversion_id,
+              order_id,
+              type,
+              amount_cents,
+              idempotency_key
+            )
+            SELECT
+              ic.user_id,
+              ic.clip_id,
+              ic.id,
+              ${input.order_id},
+              'conversion',
+              ${input.reward_cents},
+              'conversion:' || ic.id::text
+            FROM inserted_conversion ic
+            ON CONFLICT (idempotency_key) DO NOTHING
             RETURNING *
+          ),
+          updated_user AS (
+            UPDATE users
+            SET earnings = earnings + ${input.reward_cents}
+            WHERE id IN (SELECT user_id FROM inserted_reward)
+            RETURNING id
           )
           SELECT
+            EXISTS(SELECT 1 FROM clip_row) AS clip_found,
             EXISTS(SELECT 1 FROM inserted_conversion) AS conversion_recorded,
-            EXISTS(SELECT 1 FROM inserted_bonus) AS bonus_coupon_created,
-            (SELECT row_to_json(ib) FROM inserted_bonus ib LIMIT 1) AS bonus_coupon
+            EXISTS(SELECT 1 FROM inserted_reward) AS reward_credited,
+            (SELECT row_to_json(ir) FROM inserted_reward ir LIMIT 1) AS reward_transaction,
+            (SELECT creator_user_id FROM clip_row LIMIT 1) AS creator_user_id,
+            (SELECT clip_id FROM clip_row LIMIT 1) AS clip_id,
+            (SELECT push_token FROM clip_row LIMIT 1) AS push_token,
+            COALESCE((SELECT clip_created_at >= (NOW() - INTERVAL '8 hours') FROM clip_row LIMIT 1), FALSE) AS within_window
         `,
       ])
 
       const row = rows[0] as
         | {
+            clip_found: boolean
             conversion_recorded: boolean
-            bonus_coupon_created: boolean
-            bonus_coupon: unknown
+            reward_credited: boolean
+            reward_transaction: unknown
+            creator_user_id: string | null
+            clip_id: string | null
+            push_token: string | null
+            within_window: boolean
           }
         | undefined
 
-      if (!row) {
-        return {
-          conversion_recorded: false,
-          bonus_coupon_created: false,
-          bonus_coupon: null,
-        }
+      if (!row || !row.clip_found || !row.creator_user_id || !row.clip_id) {
+        return { status: "clip_not_found" }
       }
 
       return {
+        status: "ok",
+        clip_id: row.clip_id,
+        creator_user_id: row.creator_user_id,
+        push_token: row.push_token,
         conversion_recorded: row.conversion_recorded,
-        bonus_coupon_created: row.bonus_coupon_created,
-        bonus_coupon: parseJsonRow<Coupon>(row.bonus_coupon),
+        reward_credited: row.reward_credited,
+        reward_transaction: parseJsonRow<RewardTransaction>(row.reward_transaction),
+        within_window: row.within_window,
+      }
+    },
+
+    async ensureCreatorWallet(userId: string): Promise<CreatorWallet> {
+      const existing = await sql`
+        SELECT *
+        FROM creator_wallets
+        WHERE user_id = ${userId}
+        LIMIT 1
+      `
+      if (existing[0]) {
+        return existing[0] as CreatorWallet
+      }
+
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        const walletCode = generateWalletCode()
+
+        try {
+          const inserted = await sql`
+            INSERT INTO creator_wallets (user_id, wallet_code, qr_payload)
+            VALUES (${userId}, ${walletCode}, ${walletCode})
+            ON CONFLICT (user_id) DO NOTHING
+            RETURNING *
+          `
+
+          if (inserted[0]) {
+            return inserted[0] as CreatorWallet
+          }
+
+          const raced = await sql`
+            SELECT *
+            FROM creator_wallets
+            WHERE user_id = ${userId}
+            LIMIT 1
+          `
+          if (raced[0]) {
+            return raced[0] as CreatorWallet
+          }
+        } catch (error) {
+          if (!isUniqueViolation(error)) {
+            throw error
+          }
+        }
+      }
+
+      const fallbackCode = `CLIP-${userId.replace(/-/g, "").toUpperCase()}`
+      try {
+        const inserted = await sql`
+          INSERT INTO creator_wallets (user_id, wallet_code, qr_payload)
+          VALUES (${userId}, ${fallbackCode}, ${fallbackCode})
+          ON CONFLICT (user_id) DO NOTHING
+          RETURNING *
+        `
+        if (inserted[0]) {
+          return inserted[0] as CreatorWallet
+        }
+      } catch (error) {
+        if (!isUniqueViolation(error)) {
+          throw error
+        }
+      }
+
+      const finalRow = await sql`
+        SELECT *
+        FROM creator_wallets
+        WHERE user_id = ${userId}
+        LIMIT 1
+      `
+
+      if (!finalRow[0]) {
+        throw new Error("Failed to ensure creator wallet")
+      }
+
+      return finalRow[0] as CreatorWallet
+    },
+
+    async getCreatorWalletByUserId(userId: string): Promise<CreatorWallet | null> {
+      const rows = await sql`
+        SELECT *
+        FROM creator_wallets
+        WHERE user_id = ${userId}
+        LIMIT 1
+      `
+      return (rows[0] as CreatorWallet) ?? null
+    },
+
+    async getCreatorWalletByCode(walletCode: string): Promise<CreatorWallet | null> {
+      const rows = await sql`
+        SELECT *
+        FROM creator_wallets
+        WHERE wallet_code = ${walletCode}
+        LIMIT 1
+      `
+      return (rows[0] as CreatorWallet) ?? null
+    },
+
+    async updateCreatorWalletPassUrl(walletId: string, passUrl: string): Promise<CreatorWallet | null> {
+      const rows = await sql`
+        UPDATE creator_wallets
+        SET pass_url = ${passUrl}
+        WHERE id = ${walletId}
+        RETURNING *
+      `
+      return (rows[0] as CreatorWallet) ?? null
+    },
+
+    async getRewardBalances(userId: string): Promise<RewardBalances> {
+      return readRewardBalances(userId)
+    },
+
+    async getRewardTransactionsByUserId(userId: string, limit = 20): Promise<RewardTransaction[]> {
+      const normalizedLimit = Number.isFinite(limit)
+        ? Math.max(1, Math.min(100, Math.floor(limit)))
+        : 20
+
+      const rows = await sql`
+        SELECT *
+        FROM reward_transactions
+        WHERE user_id = ${userId}
+        ORDER BY created_at DESC
+        LIMIT ${normalizedLimit}
+      `
+      return rows as RewardTransaction[]
+    },
+
+    async redeemWallet(input: RedeemWalletInput): Promise<RedeemWalletResult> {
+      const idempotencyKey = walletRedeemIdempotencyKey(input.wallet_code, input.order_id)
+
+      const [rows] = await sql.transaction([
+        sql`
+          WITH wallet_row AS (
+            SELECT *
+            FROM creator_wallets
+            WHERE wallet_code = ${input.wallet_code}
+            FOR UPDATE
+          ),
+          existing_tx AS (
+            SELECT *
+            FROM reward_transactions
+            WHERE idempotency_key = ${idempotencyKey}
+            LIMIT 1
+          ),
+          balance_row AS (
+            SELECT COALESCE(SUM(amount_cents), 0)::INT AS available_cents
+            FROM reward_transactions
+            WHERE user_id = (SELECT user_id FROM wallet_row)
+          ),
+          inserted_tx AS (
+            INSERT INTO reward_transactions (
+              user_id,
+              order_id,
+              type,
+              amount_cents,
+              idempotency_key
+            )
+            SELECT
+              wr.user_id,
+              ${input.order_id},
+              'wallet_redeem',
+              ${-Math.abs(input.amount_cents)},
+              ${idempotencyKey}
+            FROM wallet_row wr
+            WHERE NOT EXISTS (SELECT 1 FROM existing_tx)
+              AND (SELECT available_cents FROM balance_row) >= ${input.amount_cents}
+            RETURNING *
+          ),
+          updated_user AS (
+            UPDATE users
+            SET earnings = earnings - ${input.amount_cents}
+            WHERE id IN (SELECT user_id FROM inserted_tx)
+            RETURNING id
+          ),
+          result_tx AS (
+            SELECT * FROM inserted_tx
+            UNION ALL
+            SELECT * FROM existing_tx
+          )
+          SELECT
+            EXISTS(SELECT 1 FROM wallet_row) AS wallet_found,
+            EXISTS(SELECT 1 FROM existing_tx) AS already_processed,
+            EXISTS(SELECT 1 FROM inserted_tx) AS debited,
+            COALESCE((SELECT available_cents FROM balance_row), 0)::INT AS available_before_cents,
+            (SELECT row_to_json(wr) FROM wallet_row wr LIMIT 1) AS wallet,
+            (SELECT row_to_json(rt) FROM result_tx rt LIMIT 1) AS reward_transaction
+        `,
+      ])
+
+      const row = rows[0] as
+        | {
+            wallet_found: boolean
+            already_processed: boolean
+            debited: boolean
+            available_before_cents: number
+            wallet: unknown
+            reward_transaction: unknown
+          }
+        | undefined
+
+      const wallet = parseJsonRow<CreatorWallet>(row?.wallet)
+      if (!row || !row.wallet_found || !wallet) {
+        return { status: "wallet_not_found" }
+      }
+
+      const rewardTransaction = parseJsonRow<RewardTransaction>(row.reward_transaction)
+
+      if (row.already_processed && rewardTransaction) {
+        const balances = await readRewardBalances(wallet.user_id)
+        return {
+          status: "already_processed",
+          wallet,
+          reward_transaction: rewardTransaction,
+          balances,
+        }
+      }
+
+      if (!row.debited || !rewardTransaction) {
+        return {
+          status: "insufficient_balance",
+          wallet,
+          available_cents: row.available_before_cents,
+        }
+      }
+
+      const balances = await readRewardBalances(wallet.user_id)
+      return {
+        status: "redeemed",
+        wallet,
+        reward_transaction: rewardTransaction,
+        balances,
       }
     },
 
