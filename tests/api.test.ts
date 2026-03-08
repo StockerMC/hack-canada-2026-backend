@@ -14,6 +14,25 @@ import type { Db } from "../src/db"
 import { createInMemoryDb } from "./helpers/inMemoryDb"
 import { getWalletSigningEnvOverrides } from "./helpers/walletSigning"
 
+function parsePngDimensions(bytes: Uint8Array): { width: number; height: number } {
+  if (bytes.length < 24) {
+    throw new Error("PNG payload too short")
+  }
+
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+  for (let i = 0; i < signature.length; i += 1) {
+    if (bytes[i] !== signature[i]) {
+      throw new Error("Invalid PNG signature")
+    }
+  }
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  return {
+    width: view.getUint32(16),
+    height: view.getUint32(20),
+  }
+}
+
 function createMockEnv(overrides: Partial<Env> = {}): Env {
   return {
     VIDEOS: {
@@ -30,6 +49,7 @@ function createMockEnv(overrides: Partial<Env> = {}): Env {
     WALLET_TEAM_ID: undefined,
     WALLET_CERT: undefined,
     WALLET_CERT_PASSWORD: undefined,
+    WALLET_SUPPORT_URL: undefined,
     WALLETWALLET_API_KEY: undefined,
     WALLETWALLET_BASE_URL: "https://walletwallet.example",
     PUBLIC_API_BASE_URL: "https://api.example",
@@ -703,6 +723,78 @@ describe("Wallet ledger API", () => {
     expect(zip.file("icon@2x.png")).toBeTruthy()
     expect(zip.file("logo.png")).toBeTruthy()
     expect(zip.file("logo@2x.png")).toBeTruthy()
+
+    const createdWallet = await db.getCreatorWalletByCode(walletCode)
+    expect(createdWallet).toBeTruthy()
+    const balances = await db.getRewardBalances(createdWallet!.user_id)
+    const availableDisplay = `$${(balances.available_cents / 100).toFixed(2)}`
+    const lifetimeDisplay = `$${(balances.lifetime_earned_cents / 100).toFixed(2)}`
+
+    const passJson = JSON.parse(await zip.file("pass.json")!.async("string"))
+    expect(passJson.organizationName).toBe("COPPED")
+    expect(passJson.logoText).toBe("COPPED")
+    expect(passJson.description).toBe("Rewards Wallet")
+    expect(passJson.backgroundColor).toBe("rgb(12, 16, 28)")
+    expect(passJson.foregroundColor).toBe("rgb(255, 255, 255)")
+    expect(passJson.labelColor).toBe("rgb(255, 164, 138)")
+
+    expect(passJson.storeCard.headerFields).toEqual([
+      {
+        key: "available_balance",
+        label: "AVAILABLE BALANCE",
+        value: availableDisplay,
+      },
+    ])
+    expect(passJson.storeCard.primaryFields).toEqual([
+      {
+        key: "wallet_code",
+        label: "WALLET CODE",
+        value: walletCode,
+      },
+    ])
+    expect(passJson.storeCard.secondaryFields).toEqual([
+      {
+        key: "scan_hint",
+        label: "SCAN AT CHECKOUT",
+        value: "Present this QR code",
+      },
+    ])
+    expect(passJson.storeCard.backFields).toEqual([
+      {
+        key: "lifetime_earned",
+        label: "LIFETIME EARNED",
+        value: lifetimeDisplay,
+      },
+      {
+        key: "wallet_code_back",
+        label: "WALLET CODE",
+        value: walletCode,
+      },
+      {
+        key: "help_url",
+        label: "HELP",
+        value: "https://copped.app/help",
+        dataDetectorTypes: ["PKDataDetectorTypeLink"],
+      },
+    ])
+    expect(passJson.storeCard.primaryFields[0].value).not.toContain("Copped Rewards")
+    expect(passJson.barcode.message).toBe(walletCode)
+    expect(passJson.barcodes).toEqual([
+      {
+        message: walletCode,
+        format: "PKBarcodeFormatQR",
+        messageEncoding: "iso-8859-1",
+      },
+    ])
+
+    const icon = new Uint8Array(await zip.file("icon.png")!.async("uint8array"))
+    const icon2x = new Uint8Array(await zip.file("icon@2x.png")!.async("uint8array"))
+    const logo = new Uint8Array(await zip.file("logo.png")!.async("uint8array"))
+    const logo2x = new Uint8Array(await zip.file("logo@2x.png")!.async("uint8array"))
+    expect(parsePngDimensions(icon)).toEqual({ width: 29, height: 29 })
+    expect(parsePngDimensions(icon2x)).toEqual({ width: 58, height: 58 })
+    expect(parsePngDimensions(logo)).toEqual({ width: 160, height: 50 })
+    expect(parsePngDimensions(logo2x)).toEqual({ width: 320, height: 100 })
   })
 
   test("/wallet/:walletCode/pass returns JSON error when WalletWallet is not configured", async () => {
@@ -773,7 +865,7 @@ describe("Wallet ledger API", () => {
     providerZip.file("pass.json", JSON.stringify({ provider: "walletwallet" }))
     const providerBytes = await providerZip.generateAsync({ type: "uint8array" })
 
-    globalThis.fetch = mock(() =>
+    const fetchMock = mock(() =>
       Promise.resolve(
         new Response(providerBytes, {
           status: 200,
@@ -783,6 +875,7 @@ describe("Wallet ledger API", () => {
         })
       )
     ) as unknown as typeof fetch
+    globalThis.fetch = fetchMock
 
     const { walletCode } = await createClipWithReceipt(
       app,
@@ -801,6 +894,52 @@ describe("Wallet ledger API", () => {
     expect(body[1]).toBe(0x4b)
     expect(body[2]).toBe(0x03)
     expect(body[3]).toBe(0x04)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit
+    const payload = JSON.parse(String(requestInit.body))
+    expect(payload.barcodeValue).toBe(walletCode)
+    expect(payload.title).toBe("COPPED")
+    expect(payload.label).toBe("WALLET CODE")
+    expect(payload.value).toBe(walletCode)
+    expect(payload.organizationName).toBe("COPPED")
+    expect(payload.description).toBe("Rewards Wallet")
+    expect(payload.logoText).toBe("COPPED")
+    expect(payload.backgroundColor).toBe("rgb(12, 16, 28)")
+    expect(payload.foregroundColor).toBe("rgb(255, 255, 255)")
+    expect(payload.labelColor).toBe("rgb(255, 164, 138)")
+    expect(payload.storeCard.headerFields[0]).toEqual({
+      key: "available_balance",
+      label: "AVAILABLE BALANCE",
+      value: "$5.00",
+    })
+    expect(payload.storeCard.primaryFields[0]).toEqual({
+      key: "wallet_code",
+      label: "WALLET CODE",
+      value: walletCode,
+    })
+    expect(payload.storeCard.secondaryFields[0]).toEqual({
+      key: "scan_hint",
+      label: "SCAN AT CHECKOUT",
+      value: "Present this QR code",
+    })
+    expect(payload.storeCard.backFields).toEqual([
+      {
+        key: "lifetime_earned",
+        label: "LIFETIME EARNED",
+        value: "$5.00",
+      },
+      {
+        key: "wallet_code_back",
+        label: "WALLET CODE",
+        value: walletCode,
+      },
+      {
+        key: "help_url",
+        label: "HELP",
+        value: "https://copped.app/help",
+      },
+    ])
   })
 
   test("/wallet/redeem debits balance, is idempotent, and blocks overdraft", async () => {

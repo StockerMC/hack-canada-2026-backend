@@ -22,6 +22,7 @@ export interface Env {
   WALLET_ORGANIZATION_NAME?: string
   WALLET_PASS_DESCRIPTION?: string
   WALLET_PASS_LOGO_TEXT?: string
+  WALLET_SUPPORT_URL?: string
 
   // WalletWallet API integration (server-side only)
   WALLETWALLET_API_KEY?: string

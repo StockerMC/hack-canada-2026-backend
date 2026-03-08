@@ -31,11 +31,11 @@ function createSelfSignedCertificate(commonName: string): {
   cert.validity.notAfter = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000)
   cert.setSubject([
     { name: "commonName", value: commonName },
-    { name: "organizationName", value: "ClipStakes Test" },
+    { name: "organizationName", value: "Copped Test" },
   ])
   cert.setIssuer([
     { name: "commonName", value: commonName },
-    { name: "organizationName", value: "ClipStakes Test" },
+    { name: "organizationName", value: "Copped Test" },
   ])
   cert.sign(keys.privateKey, forge.md.sha256.create())
 
@@ -51,24 +51,24 @@ export function getWalletSigningEnvOverrides(): WalletSigningOverrides {
   }
 
   const password = "test-pass-password"
-  const signer = createSelfSignedCertificate("pass.com.clipstakes.rewards.test")
+  const signer = createSelfSignedCertificate("pass.com.copped.rewards.test")
   const wwdr = createSelfSignedCertificate("Apple Worldwide Developer Relations Certification Authority")
   const p12Asn1 = forge.pkcs12.toPkcs12Asn1(signer.privateKey, signer.cert, password, {
     algorithm: "3des",
-    friendlyName: "ClipStakes Test Wallet Cert",
+    friendlyName: "Copped Test Wallet Cert",
     generateLocalKeyId: true,
   })
   const p12Der = forge.asn1.toDer(p12Asn1).getBytes()
 
   cachedSigningOverrides = {
-    WALLET_PASS_TYPE_ID: "pass.com.clipstakes.rewards.test",
+    WALLET_PASS_TYPE_ID: "pass.com.copped.rewards.test",
     WALLET_TEAM_ID: "CLIPTEST01",
     WALLET_CERT: forge.util.encode64(p12Der),
     WALLET_CERT_PASSWORD: password,
     WALLET_WWDR_CERT: forge.pki.certificateToPem(wwdr.cert),
-    WALLET_ORGANIZATION_NAME: "ClipStakes Test",
-    WALLET_PASS_DESCRIPTION: "ClipStakes Test Rewards",
-    WALLET_PASS_LOGO_TEXT: "ClipStakes",
+    WALLET_ORGANIZATION_NAME: "Copped Test",
+    WALLET_PASS_DESCRIPTION: "Copped Test Rewards",
+    WALLET_PASS_LOGO_TEXT: "Copped",
   }
 
   return cachedSigningOverrides

@@ -189,6 +189,8 @@ export function walletRoutes(db: Db) {
         walletCode: syncedWallet.wallet_code,
         qrPayload: syncedWallet.qr_payload,
         balanceCents: balances.available_cents,
+        lifetimeEarnedCents: balances.lifetime_earned_cents,
+        helpUrl: c.env.WALLET_SUPPORT_URL?.trim() || "https://copped.app/help",
       })
 
       if (!pkpass) {
@@ -202,6 +204,9 @@ export function walletRoutes(db: Db) {
             organizationName: c.env.WALLET_ORGANIZATION_NAME,
             description: c.env.WALLET_PASS_DESCRIPTION,
             logoText: c.env.WALLET_PASS_LOGO_TEXT,
+            supportUrl: c.env.WALLET_SUPPORT_URL,
+          }, {
+            lifetimeEarnedCents: balances.lifetime_earned_cents,
           })
         } else if (!walletWalletService.isConfigured()) {
           return c.json(

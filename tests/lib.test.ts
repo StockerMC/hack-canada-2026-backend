@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test"
 import { generateVideoKey, getVideoUrl } from "../src/lib/r2"
+import { generateStorePassJson } from "../src/lib/wallet"
 
 describe("R2 Helpers", () => {
   describe("generateVideoKey", () => {
@@ -49,5 +50,64 @@ describe("R2 Helpers", () => {
 
       expect(url).toBe("https://cdn.example.com/clips/2024/03/test.mp4")
     })
+  })
+})
+
+describe("Wallet pass payload", () => {
+  test("uses branded layout without duplicated title text", () => {
+    const pass = generateStorePassJson("CLIP-ABCD123", 500, {
+      passTypeId: "pass.com.copped.rewards.test",
+      teamId: "CLIPTEST01",
+      cert: "",
+      certPassword: "",
+    })
+
+    expect(pass).toMatchObject({
+      organizationName: "COPPED",
+      logoText: "COPPED",
+      description: "Rewards Wallet",
+      storeCard: {
+        headerFields: [
+          {
+            key: "available_balance",
+            label: "AVAILABLE BALANCE",
+            value: "$5.00",
+          },
+        ],
+        primaryFields: [
+          {
+            key: "wallet_code",
+            label: "WALLET CODE",
+            value: "CLIP-ABCD123",
+          },
+        ],
+        secondaryFields: [
+          {
+            key: "scan_hint",
+            label: "SCAN AT CHECKOUT",
+            value: "Present this QR code",
+          },
+        ],
+      },
+    })
+    expect(pass.storeCard.primaryFields[0].value).not.toContain("Copped Rewards")
+    expect(pass.storeCard.backFields).toEqual([
+      {
+        key: "lifetime_earned",
+        label: "LIFETIME EARNED",
+        value: "$5.00",
+      },
+      {
+        key: "wallet_code_back",
+        label: "WALLET CODE",
+        value: "CLIP-ABCD123",
+      },
+      {
+        key: "help_url",
+        label: "HELP",
+        value: "https://copped.app/help",
+        dataDetectorTypes: ["PKDataDetectorTypeLink"],
+      },
+    ])
   })
 })

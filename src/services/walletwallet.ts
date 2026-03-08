@@ -5,7 +5,16 @@ export type WalletPassInput = {
   walletCode: string
   qrPayload: string
   balanceCents: number
+  lifetimeEarnedCents: number
+  helpUrl: string
 }
+
+const BRANDED_ORGANIZATION = "COPPED"
+const BRANDED_DESCRIPTION = "Rewards Wallet"
+const BRANDED_LOGO_TEXT = "COPPED"
+const BRANDED_BACKGROUND_COLOR = "rgb(12, 16, 28)"
+const BRANDED_FOREGROUND_COLOR = "rgb(255, 255, 255)"
+const BRANDED_LABEL_COLOR = "rgb(255, 164, 138)"
 
 export class WalletWalletService {
   constructor(private readonly env: Env) {}
@@ -42,9 +51,60 @@ export class WalletWalletService {
         body: JSON.stringify({
           barcodeValue: input.qrPayload,
           barcodeFormat: "QR",
-          title: "CLIPSTAKES Rewards",
-          label: "Wallet",
-          value: `${input.walletCode} • ${formatCents(input.balanceCents)}`,
+          // WalletWallet documented fields:
+          // keep these for compatibility while also sending full pass-style fields below.
+          title: BRANDED_ORGANIZATION,
+          label: "WALLET CODE",
+          value: input.walletCode,
+          colorPreset: "dark",
+          // Branded pass metadata
+          organizationName: BRANDED_ORGANIZATION,
+          description: BRANDED_DESCRIPTION,
+          logoText: BRANDED_LOGO_TEXT,
+          backgroundColor: BRANDED_BACKGROUND_COLOR,
+          foregroundColor: BRANDED_FOREGROUND_COLOR,
+          labelColor: BRANDED_LABEL_COLOR,
+          // Desired Apple Wallet-style hierarchy
+          storeCard: {
+            headerFields: [
+              {
+                key: "available_balance",
+                label: "AVAILABLE BALANCE",
+                value: formatCents(input.balanceCents),
+              },
+            ],
+            primaryFields: [
+              {
+                key: "wallet_code",
+                label: "WALLET CODE",
+                value: input.walletCode,
+              },
+            ],
+            secondaryFields: [
+              {
+                key: "scan_hint",
+                label: "SCAN AT CHECKOUT",
+                value: "Present this QR code",
+              },
+            ],
+            backFields: [
+              {
+                key: "lifetime_earned",
+                label: "LIFETIME EARNED",
+                value: formatCents(input.lifetimeEarnedCents),
+              },
+              {
+                key: "wallet_code_back",
+                label: "WALLET CODE",
+                value: input.walletCode,
+              },
+              {
+                key: "help_url",
+                label: "HELP",
+                value: input.helpUrl,
+              },
+            ],
+          },
         }),
       })
 
