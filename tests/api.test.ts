@@ -3,6 +3,7 @@ import { Hono } from "hono"
 import { generateKeyPairSync } from "node:crypto"
 import JSZip from "jszip"
 import { clipsRoutes } from "../src/routes/clips"
+import { checkoutRoutes } from "../src/routes/checkout"
 import { conversionsRoutes } from "../src/routes/conversions"
 import { receiptsRoutes } from "../src/routes/receipts"
 import { rewardsRoutes } from "../src/routes/rewards"
@@ -37,9 +38,58 @@ function createMockEnv(overrides: Partial<Env> = {}): Env {
   }
 }
 
+function createMockR2VideoObject(
+  data: Uint8Array,
+  totalSize = data.length
+): R2ObjectBody {
+  return {
+    key: "clips/test.mp4",
+    version: "v1",
+    size: totalSize,
+    etag: "etag-123",
+    httpEtag: "\"etag-123\"",
+    checksums: {
+      toJSON: () => ({}),
+    },
+    uploaded: new Date("2026-03-08T00:00:00.000Z"),
+    storageClass: "Standard",
+    range: undefined,
+    body: new Blob([data]).stream(),
+    bodyUsed: false,
+    writeHttpMetadata: (headers: Headers) => {
+      headers.set("Content-Type", "video/mp4")
+    },
+    arrayBuffer: async () => data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
+    bytes: async () => data,
+    text: async () => new TextDecoder().decode(data),
+    json: async <T>() => JSON.parse(new TextDecoder().decode(data)) as T,
+    blob: async () => new Blob([data]),
+  } as unknown as R2ObjectBody
+}
+
+function createMockR2VideoMetadata(totalSize: number): R2Object {
+  return {
+    key: "clips/test.mp4",
+    version: "v1",
+    size: totalSize,
+    etag: "etag-123",
+    httpEtag: "\"etag-123\"",
+    checksums: {
+      toJSON: () => ({}),
+    },
+    uploaded: new Date("2026-03-08T00:00:00.000Z"),
+    storageClass: "Standard",
+    range: undefined,
+    writeHttpMetadata: (headers: Headers) => {
+      headers.set("Content-Type", "video/mp4")
+    },
+  } as unknown as R2Object
+}
+
 function buildApp(db: Db) {
   const app = new Hono<{ Bindings: Env }>()
   app.route("/clips", clipsRoutes(db))
+  app.route("/checkout", checkoutRoutes(db))
   app.route("/receipt", receiptsRoutes(db))
   app.route("/conversions", conversionsRoutes(db))
   app.route("/rewards", rewardsRoutes(db))
@@ -199,6 +249,162 @@ describe("Wallet ledger API", () => {
     const body = await response.json()
     expect(body.wallet.pass_url).toBeTruthy()
     expect(body.wallet.code).toBe(body.wallet.wallet_code)
+  })
+
+  test("/checkout/dev creates receipt and attributes conversion when clip_id is provided", async () => {
+    const db = createInMemoryDb()
+    const app = buildApp(db)
+    const env = createMockEnv()
+
+    const { clipId } = await createClipWithReceipt(app, env, db, "device-checkout-with-clip", "product-1")
+
+    const response = await app.request(
+      "/checkout/dev",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Device-ID": "device-checkout-viewer",
+        },
+        body: JSON.stringify({
+          product_id: "prod_hoodie",
+          clip_id: clipId,
+        }),
+      },
+      env
+    )
+
+    expect(response.status).toBe(201)
+    const body = await response.json()
+
+    expect(body.order_id).toMatch(/^order_/)
+    expect(typeof body.receipt_id).toBe("string")
+    expect(body.conversion).toBeTruthy()
+    expect(body.conversion.success).toBe(true)
+    expect(body.conversion.credited_cents).toBe(500)
+    expect(body.conversion.credited_display).toBe("$5.00")
+    expect(body.conversion.available_balance_cents).toBe(1000)
+    expect(body.conversion.available_balance_display).toBe("$10.00")
+    expect(body.conversion.push_sent).toBe(false)
+    expect(body.conversion.within_push_window).toBe(true)
+
+    const receiptResponse = await app.request(`/receipt/${body.receipt_id as string}`, { method: "GET" }, env)
+    expect(receiptResponse.status).toBe(200)
+    const receiptBody = await receiptResponse.json()
+    expect(receiptBody.product_ids).toEqual(["prod_hoodie"])
+  })
+
+  test("/checkout/dev returns conversion null when clip_id is omitted", async () => {
+    const db = createInMemoryDb()
+    const app = buildApp(db)
+    const env = createMockEnv()
+
+    const response = await app.request(
+      "/checkout/dev",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Device-ID": "device-checkout-no-clip",
+        },
+        body: JSON.stringify({
+          product_id: "prod_hoodie",
+        }),
+      },
+      env
+    )
+
+    expect(response.status).toBe(201)
+    const body = await response.json()
+    expect(body.order_id).toMatch(/^order_/)
+    expect(typeof body.receipt_id).toBe("string")
+    expect(body.conversion).toBeNull()
+
+    const receiptResponse = await app.request(`/receipt/${body.receipt_id as string}`, { method: "GET" }, env)
+    expect(receiptResponse.status).toBe(200)
+    const receiptBody = await receiptResponse.json()
+    expect(receiptBody.product_ids).toEqual(["prod_hoodie"])
+  })
+
+  test("/checkout/dev rejects missing X-Device-ID", async () => {
+    const db = createInMemoryDb()
+    const app = buildApp(db)
+    const env = createMockEnv()
+
+    const response = await app.request(
+      "/checkout/dev",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          product_id: "prod_hoodie",
+        }),
+      },
+      env
+    )
+
+    expect(response.status).toBe(401)
+  })
+
+  test("/checkout/dev validates payload", async () => {
+    const db = createInMemoryDb()
+    const app = buildApp(db)
+    const env = createMockEnv()
+
+    const response = await app.request(
+      "/checkout/dev",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Device-ID": "device-checkout-bad-payload",
+        },
+        body: JSON.stringify({
+          clip_id: "some-clip-id",
+        }),
+      },
+      env
+    )
+
+    expect(response.status).toBe(400)
+  })
+
+  test("/checkout/dev returns conversion success=false for unknown clip_id without crashing", async () => {
+    const db = createInMemoryDb()
+    const app = buildApp(db)
+    const env = createMockEnv()
+
+    const response = await app.request(
+      "/checkout/dev",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Device-ID": "device-checkout-unknown-clip",
+        },
+        body: JSON.stringify({
+          product_id: "prod_hoodie",
+          clip_id: "unknown-clip-id",
+        }),
+      },
+      env
+    )
+
+    expect(response.status).toBe(201)
+    const body = await response.json()
+    expect(body.order_id).toMatch(/^order_/)
+    expect(typeof body.receipt_id).toBe("string")
+    expect(body.conversion).toEqual({
+      success: false,
+      credited_cents: 0,
+      credited_display: "$0.00",
+      available_balance_cents: 0,
+      available_balance_display: "$0.00",
+      push_sent: false,
+      within_push_window: false,
+    })
   })
 
   test("every unique conversion credits +500", async () => {
@@ -728,5 +934,107 @@ describe("Upload aliases", () => {
     expect(uploadUrlBody).toHaveProperty("upload_url")
     expect((uploadBody.upload_url as string).startsWith("https://")).toBe(true)
     expect((uploadBody.video_url as string).startsWith("https://")).toBe(true)
+  })
+})
+
+describe("Upload playback ranges", () => {
+  test("returns 200 without range header", async () => {
+    const db = createInMemoryDb()
+    const app = buildApp(db)
+    const data = new Uint8Array([1, 2, 3, 4, 5, 6])
+
+    const env = createMockEnv({
+      VIDEOS: {
+        put: mock(() => Promise.resolve({})),
+        get: mock(() => Promise.resolve(createMockR2VideoObject(data))),
+        head: mock(() => Promise.resolve(createMockR2VideoMetadata(data.length))),
+        delete: mock(() => Promise.resolve()),
+      } as unknown as R2Bucket,
+    })
+
+    const response = await app.request("/upload/clips/test.mp4", { method: "GET" }, env)
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("Accept-Ranges")).toBe("bytes")
+    expect(response.headers.get("Content-Length")).toBe(String(data.length))
+    expect((await response.arrayBuffer()).byteLength).toBe(data.length)
+  })
+
+  test("returns 206 with valid byte range", async () => {
+    const db = createInMemoryDb()
+    const app = buildApp(db)
+    const totalBytes = 2048
+    const data = new Uint8Array(totalBytes)
+    data.forEach((_, idx) => {
+      data[idx] = idx % 251
+    })
+
+    const getMock = mock((_: string, options?: R2GetOptions) => {
+      const rangeOption = options?.range as R2Range | undefined
+      if (!rangeOption || !("offset" in rangeOption)) {
+        return Promise.resolve(createMockR2VideoObject(data))
+      }
+
+      const offset = rangeOption.offset ?? 0
+      const requestedLength = "length" in rangeOption && rangeOption.length !== undefined
+        ? rangeOption.length
+        : data.length - offset
+      const chunk = data.slice(offset, offset + requestedLength)
+      return Promise.resolve(createMockR2VideoObject(chunk, data.length))
+    })
+
+    const env = createMockEnv({
+      VIDEOS: {
+        put: mock(() => Promise.resolve({})),
+        get: getMock,
+        head: mock(() => Promise.resolve(createMockR2VideoMetadata(data.length))),
+        delete: mock(() => Promise.resolve()),
+      } as unknown as R2Bucket,
+    })
+
+    const response = await app.request(
+      "/upload/clips/test.mp4",
+      {
+        method: "GET",
+        headers: { Range: "bytes=0-1023" },
+      },
+      env
+    )
+
+    expect(response.status).toBe(206)
+    expect(response.headers.get("Accept-Ranges")).toBe("bytes")
+    expect(response.headers.get("Content-Range")).toBe(`bytes 0-1023/${data.length}`)
+    expect(response.headers.get("Content-Length")).toBe("1024")
+    expect((await response.arrayBuffer()).byteLength).toBe(1024)
+  })
+
+  test("returns 416 with invalid byte range", async () => {
+    const db = createInMemoryDb()
+    const app = buildApp(db)
+    const data = new Uint8Array(512)
+
+    const getMock = mock(() => Promise.resolve(createMockR2VideoObject(data)))
+    const env = createMockEnv({
+      VIDEOS: {
+        put: mock(() => Promise.resolve({})),
+        get: getMock,
+        head: mock(() => Promise.resolve(createMockR2VideoMetadata(data.length))),
+        delete: mock(() => Promise.resolve()),
+      } as unknown as R2Bucket,
+    })
+
+    const response = await app.request(
+      "/upload/clips/test.mp4",
+      {
+        method: "GET",
+        headers: { Range: "bytes=9999-10000" },
+      },
+      env
+    )
+
+    expect(response.status).toBe(416)
+    expect(response.headers.get("Accept-Ranges")).toBe("bytes")
+    expect(response.headers.get("Content-Range")).toBe(`bytes */${data.length}`)
+    expect(getMock).toHaveBeenCalledTimes(0)
   })
 })

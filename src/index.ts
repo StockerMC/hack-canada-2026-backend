@@ -11,6 +11,7 @@ import { conversionsRoutes } from "./routes/conversions"
 import { walletRoutes } from "./routes/wallet"
 import { rewardsRoutes } from "./routes/rewards"
 import { couponsRoutes } from "./routes/coupons"
+import { checkoutRoutes } from "./routes/checkout"
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -37,6 +38,7 @@ export default {
     app.route("/rewards", rewardsRoutes(db))
     app.route("/coupons", couponsRoutes(db))
     app.route("/wallet", walletRoutes(db))
+    app.route("/checkout", checkoutRoutes(db))
 
     return app.fetch(request, env, ctx)
   },
