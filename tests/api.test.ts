@@ -171,6 +171,34 @@ describe("Wallet ledger API", () => {
     expect(rewardsBody.balances.available_cents).toBe(500)
   })
 
+  test("clip creation falls back when receipt_id is not a UUID", async () => {
+    const db = createInMemoryDb()
+    const app = buildApp(db)
+    const env = createMockEnv()
+
+    const response = await app.request(
+      "/clips",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Device-ID": "device-non-uuid-receipt",
+        },
+        body: JSON.stringify({
+          receipt_id: "ios-receipt-token-123",
+          product_id: "product-123",
+          video_url: "https://clipstakes.skilled5041.workers.dev/upload/clips/new.mp4",
+        }),
+      },
+      env
+    )
+
+    expect(response.status).toBe(201)
+    const body = await response.json()
+    expect(body.wallet.pass_url).toBeTruthy()
+    expect(body.wallet.code).toBe(body.wallet.wallet_code)
+  })
+
   test("every unique conversion credits +500", async () => {
     const db = createInMemoryDb()
     const app = buildApp(db)

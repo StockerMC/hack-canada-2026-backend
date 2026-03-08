@@ -15,6 +15,21 @@ const createClipSchema = z.object({
   duration_seconds: z.number().int().positive().max(300).optional(),
 })
 
+const uuidSchema = z.string().uuid()
+
+function normalizeUuid(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return undefined
+  }
+
+  return uuidSchema.safeParse(trimmed).success ? trimmed : undefined
+}
+
 function mapClipForViewer(clip: {
   id: string
   product_id: string
@@ -108,11 +123,12 @@ export function clipsRoutes(db: Db) {
     try {
       const user = await getOrCreateUser(deviceId)
       const rewardsService = new RewardsService(db, new WalletWalletService(c.env))
+      const receiptId = normalizeUuid(parsed.data.receipt_id)
 
-      if (parsed.data.receipt_id) {
+      if (receiptId) {
         const result = await db.createClipWithReceiptAndReward({
           user_id: user.id,
-          receipt_id: parsed.data.receipt_id,
+          receipt_id: receiptId,
           product_id: parsed.data.product_id,
           video_url: parsed.data.video_url,
           text_overlay: parsed.data.text_overlay ?? null,
