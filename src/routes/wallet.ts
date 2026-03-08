@@ -77,6 +77,7 @@ export function walletRoutes(db: Db) {
           {
             error: "Insufficient balance",
             wallet: {
+              code: wallet.wallet_code,
               wallet_code: wallet.wallet_code,
               pass_url: wallet.pass_url,
               qr_payload: wallet.qr_payload,
@@ -94,6 +95,7 @@ export function walletRoutes(db: Db) {
         success: true,
         idempotent: result.status === "already_processed",
         wallet: {
+          code: wallet.wallet_code,
           wallet_code: wallet.wallet_code,
           pass_url: wallet.pass_url,
           qr_payload: wallet.qr_payload,
@@ -137,6 +139,7 @@ export function walletRoutes(db: Db) {
 
       return c.json({
         wallet: {
+          code: syncedWallet.wallet_code,
           wallet_code: syncedWallet.wallet_code,
           pass_url: syncedWallet.pass_url,
           qr_payload: syncedWallet.qr_payload,

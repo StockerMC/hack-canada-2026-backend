@@ -4,6 +4,7 @@ import { WalletWalletService } from "./walletwallet"
 export const REWARD_CENTS = 500
 
 export type WalletResponse = {
+  code: string
   wallet_code: string
   pass_url: string | null
   qr_payload: string
@@ -39,6 +40,7 @@ function formatCents(cents: number): string {
 
 function mapWallet(wallet: CreatorWallet): WalletResponse {
   return {
+    code: wallet.wallet_code,
     wallet_code: wallet.wallet_code,
     pass_url: wallet.pass_url,
     qr_payload: wallet.qr_payload,

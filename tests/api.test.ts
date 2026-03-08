@@ -129,6 +129,7 @@ describe("Wallet ledger API", () => {
     expect(first.status).toBe(201)
     const firstBody = await first.json()
     expect(firstBody.clip_id).toBe(firstBody.clip.id)
+    expect(firstBody.wallet.code).toBe(firstBody.wallet.wallet_code)
     expect(firstBody.wallet_code).toBe(firstBody.wallet.wallet_code)
     expect(firstBody.pass_url).toBe(firstBody.wallet.pass_url)
     expect(firstBody.reward.credited_cents).toBe(500)
@@ -359,6 +360,7 @@ describe("Wallet ledger API", () => {
     const body = await response.json()
 
     expect(body.wallet.wallet_code).toBe(walletCode)
+    expect(body.wallet.code).toBe(walletCode)
     expect(body.wallet.pass_url).toBe(`https://api.example/wallet/${walletCode}/pass`)
     expect(body.balances.available_cents).toBe(1000)
     expect(body.balances.lifetime_earned_cents).toBe(1000)
@@ -475,6 +477,7 @@ describe("Wallet ledger API", () => {
 
     const redeemBody = await redeem.json()
     expect(redeem.status).toBe(200)
+    expect(redeemBody.wallet.code).toBe(walletCode)
     expect(redeemBody.wallet.pass_url).toBe(`https://api.example/wallet/${walletCode}/pass`)
     expect(redeemBody.balances.available_cents).toBe(200)
 
@@ -495,6 +498,7 @@ describe("Wallet ledger API", () => {
     const retryBody = await redeemRetry.json()
     expect(redeemRetry.status).toBe(200)
     expect(retryBody.idempotent).toBe(true)
+    expect(retryBody.wallet.code).toBe(walletCode)
     expect(retryBody.wallet.pass_url).toBe(`https://api.example/wallet/${walletCode}/pass`)
     expect(retryBody.balances.available_cents).toBe(200)
 
