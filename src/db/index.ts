@@ -344,7 +344,11 @@ export function createDb(databaseUrl: string): Db {
             SELECT CASE
               WHEN NOT EXISTS (SELECT 1 FROM receipt_row) THEN 'receipt_not_found'
               WHEN (SELECT clip_created FROM receipt_row) THEN 'receipt_already_used'
-              WHEN NOT (${input.product_id} = ANY ((SELECT product_ids FROM receipt_row))) THEN 'product_not_in_receipt'
+              WHEN NOT EXISTS (
+                SELECT 1
+                FROM receipt_row rr
+                WHERE ${input.product_id} = ANY (rr.product_ids)
+              ) THEN 'product_not_in_receipt'
               ELSE 'ok'
             END AS status
           ),
