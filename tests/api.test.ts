@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 import { generateKeyPairSync } from "node:crypto"
+import JSZip from "jszip"
 import { clipsRoutes } from "../src/routes/clips"
 import { conversionsRoutes } from "../src/routes/conversions"
 import { receiptsRoutes } from "../src/routes/receipts"
@@ -10,6 +11,7 @@ import { walletRoutes } from "../src/routes/wallet"
 import type { Env } from "../src/types"
 import type { Db } from "../src/db"
 import { createInMemoryDb } from "./helpers/inMemoryDb"
+import { getWalletSigningEnvOverrides } from "./helpers/walletSigning"
 
 function createMockEnv(overrides: Partial<Env> = {}): Env {
   return {
@@ -470,16 +472,53 @@ describe("Wallet ledger API", () => {
     expect(clipBody.wallet.pass_url).toBe(`https://api.clipstakes.app/wallet/${walletCode}/pass`)
   })
 
-  test("/wallet/:walletCode/pass returns pkpass when WalletWallet is not configured", async () => {
+  test("/wallet/:walletCode/pass returns a signed pkpass archive with required files", async () => {
     const db = createInMemoryDb()
     const app = buildApp(db)
-    const env = createMockEnv()
+    const env = createMockEnv(getWalletSigningEnvOverrides())
 
     const { walletCode } = await createClipWithReceipt(app, env, db, "device-pass-endpoint", "product-1")
 
     const response = await app.request(`/wallet/${walletCode}/pass`, { method: "GET" }, env)
     expect(response.status).toBe(200)
     expect(response.headers.get("Content-Type")).toContain("application/vnd.apple.pkpass")
+
+    const archive = new Uint8Array(await response.arrayBuffer())
+    expect(archive[0]).toBe(0x50)
+    expect(archive[1]).toBe(0x4b)
+    expect(archive[2]).toBe(0x03)
+    expect(archive[3]).toBe(0x04)
+
+    const zip = await JSZip.loadAsync(archive)
+    expect(zip.file("pass.json")).toBeTruthy()
+    expect(zip.file("manifest.json")).toBeTruthy()
+    expect(zip.file("signature")).toBeTruthy()
+    expect(zip.file("icon.png")).toBeTruthy()
+    expect(zip.file("icon@2x.png")).toBeTruthy()
+    expect(zip.file("logo.png")).toBeTruthy()
+    expect(zip.file("logo@2x.png")).toBeTruthy()
+  })
+
+  test("/wallet/:walletCode/pass returns JSON error when local signing is not configured", async () => {
+    const db = createInMemoryDb()
+    const app = buildApp(db)
+    const env = createMockEnv()
+
+    const { walletCode } = await createClipWithReceipt(
+      app,
+      env,
+      db,
+      "device-pass-missing-config",
+      "product-1"
+    )
+
+    const response = await app.request(`/wallet/${walletCode}/pass`, { method: "GET" }, env)
+    expect(response.status).toBe(503)
+    expect(response.headers.get("Content-Type")).toContain("application/json")
+
+    const body = await response.json()
+    expect(body.error).toBe("Wallet pass signing not configured")
+    expect(Array.isArray(body.missing)).toBe(true)
   })
 
   test("/wallet/redeem debits balance, is idempotent, and blocks overdraft", async () => {

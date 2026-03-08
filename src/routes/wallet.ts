@@ -2,7 +2,7 @@ import { Hono, type Context } from "hono"
 import { z } from "zod"
 import type { Env } from "../types"
 import type { CreatorWallet, Db } from "../db"
-import { generatePkpass, generateStorePassJson } from "../lib/wallet"
+import { WalletPassConfigError, generatePkpass, generateStorePassJson } from "../lib/wallet"
 import { WalletWalletService } from "../services/walletwallet"
 import { isWalletLedgerSchemaError } from "../lib/dbErrors"
 
@@ -183,11 +183,15 @@ export function walletRoutes(db: Db) {
       })
 
       if (!pkpass) {
-        pkpass = await generatePkpass(wallet.user_id, balances.available_cents, {
-          passTypeId: c.env.WALLET_PASS_TYPE_ID ?? "pass.com.clipstakes.rewards",
-          teamId: c.env.WALLET_TEAM_ID ?? "CLIPSTAKES",
+        pkpass = await generatePkpass(syncedWallet.wallet_code, balances.available_cents, {
+          passTypeId: c.env.WALLET_PASS_TYPE_ID ?? "",
+          teamId: c.env.WALLET_TEAM_ID ?? "",
           cert: c.env.WALLET_CERT ?? "",
           certPassword: c.env.WALLET_CERT_PASSWORD ?? "",
+          wwdrCert: c.env.WALLET_WWDR_CERT,
+          organizationName: c.env.WALLET_ORGANIZATION_NAME,
+          description: c.env.WALLET_PASS_DESCRIPTION,
+          logoText: c.env.WALLET_PASS_LOGO_TEXT,
         })
       }
 
@@ -201,6 +205,15 @@ export function walletRoutes(db: Db) {
     } catch (error) {
       if (isWalletLedgerSchemaError(error)) {
         return walletLedgerUnavailable(c)
+      }
+      if (error instanceof WalletPassConfigError) {
+        return c.json(
+          {
+            error: "Wallet pass signing not configured",
+            missing: error.missingKeys,
+          },
+          503
+        )
       }
 
       console.error("Failed to generate wallet pass", error)

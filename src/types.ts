@@ -18,6 +18,10 @@ export interface Env {
   WALLET_TEAM_ID?: string
   WALLET_CERT?: string
   WALLET_CERT_PASSWORD?: string
+  WALLET_WWDR_CERT?: string
+  WALLET_ORGANIZATION_NAME?: string
+  WALLET_PASS_DESCRIPTION?: string
+  WALLET_PASS_LOGO_TEXT?: string
 
   // WalletWallet API integration (server-side only)
   WALLETWALLET_API_KEY?: string

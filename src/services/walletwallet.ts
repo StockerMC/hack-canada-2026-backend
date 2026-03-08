@@ -58,7 +58,21 @@ export class WalletWalletService {
         return null
       }
 
-      return await response.arrayBuffer()
+      const contentType = response.headers.get("Content-Type") ?? ""
+      const payload = new Uint8Array(await response.arrayBuffer())
+      if (
+        !contentType.toLowerCase().includes("application/vnd.apple.pkpass") ||
+        !isZipArchive(payload)
+      ) {
+        console.error("WalletWallet returned non-pkpass payload", {
+          walletCode: input.walletCode,
+          contentType,
+          size: payload.byteLength,
+        })
+        return null
+      }
+
+      return payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength)
     } catch (error) {
       console.error("WalletWallet request failed", {
         walletCode: input.walletCode,
@@ -75,6 +89,14 @@ export class WalletWalletService {
     }
     return `${base}/api/pkpass`
   }
+}
+
+function isZipArchive(bytes: Uint8Array): boolean {
+  if (bytes.length < 4) {
+    return false
+  }
+
+  return bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04
 }
 
 function formatCents(cents: number): string {
