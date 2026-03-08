@@ -15,6 +15,31 @@ const createClipSchema = z.object({
   duration_seconds: z.number().int().positive().max(300).optional(),
 })
 
+function mapClipForViewer(clip: {
+  id: string
+  product_id: string
+  video_url: string
+  text_overlay: string | null
+  text_position: string | null
+  duration_seconds: number | null
+  conversions: number
+  created_at: Date
+}) {
+  return {
+    id: clip.id,
+    clip_id: clip.id,
+    product_id: clip.product_id,
+    video_url: clip.video_url,
+    url: clip.video_url,
+    text_overlay: clip.text_overlay,
+    text_position: clip.text_position,
+    duration_seconds: clip.duration_seconds,
+    conversions: clip.conversions,
+    is_active: true,
+    created_at: clip.created_at,
+  }
+}
+
 export function clipsRoutes(db: Db) {
   const app = new Hono<{ Bindings: Env }>()
 
@@ -57,12 +82,7 @@ export function clipsRoutes(db: Db) {
     const clips = await db.getClipsByProductId(productId)
 
     return c.json({
-      clips: clips.map((clip) => ({
-        id: clip.id,
-        video_url: clip.video_url,
-        conversions: clip.conversions,
-        created_at: clip.created_at,
-      })),
+      clips: clips.map((clip) => mapClipForViewer(clip)),
     })
   })
 
@@ -119,8 +139,12 @@ export function clipsRoutes(db: Db) {
         return c.json(
           {
             clip: result.clip,
+            id: result.clip.id,
+            clip_id: result.clip.id,
             reward: rewardsService.formatReward(REWARD_CENTS, "clip_published"),
             wallet,
+            wallet_code: wallet.wallet_code,
+            pass_url: wallet.pass_url,
             balances,
             totals: {
               available_cents: balances.available_cents,
@@ -147,8 +171,12 @@ export function clipsRoutes(db: Db) {
       return c.json(
         {
           clip: created.clip,
+          id: created.clip.id,
+          clip_id: created.clip.id,
           reward: rewardsService.formatReward(REWARD_CENTS, "clip_published"),
           wallet,
+          wallet_code: wallet.wallet_code,
+          pass_url: wallet.pass_url,
           balances,
           totals: {
             available_cents: balances.available_cents,

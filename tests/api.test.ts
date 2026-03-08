@@ -128,6 +128,9 @@ describe("Wallet ledger API", () => {
 
     expect(first.status).toBe(201)
     const firstBody = await first.json()
+    expect(firstBody.clip_id).toBe(firstBody.clip.id)
+    expect(firstBody.wallet_code).toBe(firstBody.wallet.wallet_code)
+    expect(firstBody.pass_url).toBe(firstBody.wallet.pass_url)
     expect(firstBody.reward.credited_cents).toBe(500)
     expect(firstBody.reward.reason).toBe("clip_published")
     expect(firstBody.balances.available_cents).toBe(500)
@@ -362,6 +365,48 @@ describe("Wallet ledger API", () => {
     expect(Array.isArray(body.transactions)).toBe(true)
     expect(body.transactions.length).toBeGreaterThanOrEqual(2)
     expect(body.transactions[0]).toHaveProperty("amount_display")
+  })
+
+  test("GET /clips/:productId returns viewer-compatible clip shape", async () => {
+    const db = createInMemoryDb()
+    const app = buildApp(db)
+    const env = createMockEnv()
+
+    const response = await app.request(
+      "/clips",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Device-ID": "device-viewer-shape",
+        },
+        body: JSON.stringify({
+          product_id: "product-viewer-shape",
+          video_url: "https://clipstakes.skilled5041.workers.dev/upload/clips/viewer-shape.mp4",
+          text_overlay: "Overlay",
+          text_position: "top",
+          duration_seconds: 12,
+        }),
+      },
+      env
+    )
+
+    expect(response.status).toBe(201)
+    const list = await app.request("/clips/product-viewer-shape", { method: "GET" }, env)
+    expect(list.status).toBe(200)
+
+    const listBody = await list.json()
+    expect(Array.isArray(listBody.clips)).toBe(true)
+    expect(listBody.clips.length).toBe(1)
+    expect(listBody.clips[0]).toHaveProperty("id")
+    expect(listBody.clips[0]).toHaveProperty("clip_id")
+    expect(listBody.clips[0]).toHaveProperty("product_id", "product-viewer-shape")
+    expect(listBody.clips[0]).toHaveProperty("video_url")
+    expect(listBody.clips[0]).toHaveProperty("url")
+    expect(listBody.clips[0]).toHaveProperty("text_overlay", "Overlay")
+    expect(listBody.clips[0]).toHaveProperty("text_position", "top")
+    expect(listBody.clips[0]).toHaveProperty("duration_seconds", 12)
+    expect(listBody.clips[0]).toHaveProperty("is_active", true)
   })
 
   test("wallet pass_url uses PUBLIC_API_BASE_URL even without WalletWallet API key", async () => {
