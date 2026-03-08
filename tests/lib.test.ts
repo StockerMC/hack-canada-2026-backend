@@ -32,20 +32,20 @@ describe("R2 Helpers", () => {
   })
 
   describe("getVideoUrl", () => {
-    test("uses custom domain when provided", () => {
-      const url = getVideoUrl("clips/test.mp4", "cdn.example.com")
+    test("uses configured public video base when provided", () => {
+      const url = getVideoUrl("clips/test.mp4", "https://cdn.example.com/videos")
 
-      expect(url).toBe("https://cdn.example.com/clips/test.mp4")
+      expect(url).toBe("https://cdn.example.com/videos/clips/test.mp4")
     })
 
-    test("uses default domain when no custom domain", () => {
+    test("uses workers.dev upload path by default", () => {
       const url = getVideoUrl("clips/test.mp4")
 
-      expect(url).toBe("https://videos.clipstakes.app/clips/test.mp4")
+      expect(url).toBe("https://clipstakes.skilled5041.workers.dev/upload/clips/test.mp4")
     })
 
     test("handles nested paths", () => {
-      const url = getVideoUrl("clips/2024/03/test.mp4", "cdn.example.com")
+      const url = getVideoUrl("clips/2024/03/test.mp4", "https://cdn.example.com")
 
       expect(url).toBe("https://cdn.example.com/clips/2024/03/test.mp4")
     })

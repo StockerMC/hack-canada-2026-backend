@@ -27,8 +27,9 @@
 	// - APNS_TEAM_ID: Apple Team ID
 	// - APNS_PRIVATE_KEY: APNs private key (base64)
 	// - WALLETWALLET_API_KEY: WalletWallet API key (server-side only)
-	// - WALLETWALLET_TEMPLATE_ID: WalletWallet pass template ID
 	// - WALLETWALLET_BASE_URL: WalletWallet API URL (optional, default https://api.walletwallet.dev)
+	// - PUBLIC_API_BASE_URL: Canonical public API URL used for generated links (e.g. https://api.clipstakes.app)
+	// - PUBLIC_VIDEO_BASE_URL: Canonical public video URL base (e.g. https://cdn.clipstakes.app/clips)
 	// Optional legacy wallet endpoint secrets:
 	// - WALLET_PASS_TYPE_ID
 	// - WALLET_TEAM_ID

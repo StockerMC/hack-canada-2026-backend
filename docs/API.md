@@ -28,7 +28,7 @@ Request:
 {
   "receipt_id": "uuid",
   "product_id": "shopify-product-123",
-  "video_url": "https://videos.clipstakes.app/clips/abc123.mp4",
+  "video_url": "https://clipstakes.skilled5041.workers.dev/upload/clips/abc123.mp4",
   "text_overlay": "optional",
   "text_position": "optional",
   "duration_seconds": 15
@@ -43,7 +43,7 @@ Response (`201`):
     "id": "uuid",
     "receipt_id": "uuid",
     "product_id": "shopify-product-123",
-    "video_url": "https://videos.clipstakes.app/clips/abc123.mp4",
+    "video_url": "https://clipstakes.skilled5041.workers.dev/upload/clips/abc123.mp4",
     "conversions": 0,
     "created_at": "2026-03-07T12:00:00Z"
   },
@@ -54,7 +54,7 @@ Response (`201`):
   },
   "wallet": {
     "wallet_code": "CLIP-...",
-    "pass_url": null,
+    "pass_url": "https://clipstakes.<your-worker>.workers.dev/wallet/CLIP-.../pass",
     "qr_payload": "CLIP-..."
   },
   "balances": {
@@ -134,7 +134,7 @@ Returns wallet identity, balances, and recent ledger transactions for `X-Device-
 {
   "wallet": {
     "wallet_code": "CLIP-...",
-    "pass_url": "https://...pkpass",
+    "pass_url": "https://clipstakes.<your-worker>.workers.dev/wallet/CLIP-.../pass",
     "qr_payload": "CLIP-..."
   },
   "balances": {
@@ -180,7 +180,7 @@ Response:
   "success": true,
   "wallet": {
     "wallet_code": "CLIP-...",
-    "pass_url": "https://...pkpass",
+    "pass_url": "https://clipstakes.<your-worker>.workers.dev/wallet/CLIP-.../pass",
     "qr_payload": "CLIP-..."
   },
   "redemption": {
@@ -205,13 +205,17 @@ Errors:
 
 Scanner-friendly wallet balance lookup.
 
+### `GET /wallet/:wallet_code/pass`
+
+Returns an Apple Wallet pass file (`application/vnd.apple.pkpass`) for the wallet code.
+
 ## Uploads
 
 Both aliases are supported:
 - `POST /upload`
 - `POST /upload-url`
 
-Both return the same payload with `upload_url`, `video_id`, `key`, and `video_url`.
+Both return the same payload with `upload_url`, `video_id`, `key`, and `video_url` as absolute HTTPS URLs.
 
 ## Legacy Coupon Compatibility
 

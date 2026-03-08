@@ -1,13 +1,16 @@
+import { buildAbsoluteHttpsUrl, resolvePublicVideoBaseUrl } from "./urls"
+
 /**
- * Generate a video URL from R2 key
- * In production, this would be a custom domain or R2 public URL
+ * Generate a public video URL from an R2 key.
+ * Defaults to the current live Worker host and can be overridden via PUBLIC_VIDEO_BASE_URL.
  */
-export function getVideoUrl(key: string, customDomain?: string): string {
-  if (customDomain) {
-    return `https://${customDomain}/${key}`
-  }
-  // Default to a placeholder - configure with actual R2 public URL
-  return `https://videos.clipstakes.app/${key}`
+export function getVideoUrl(
+  key: string,
+  publicVideoBaseUrl?: string,
+  requestOrigin = "https://clipstakes.skilled5041.workers.dev"
+): string {
+  const baseUrl = resolvePublicVideoBaseUrl(publicVideoBaseUrl, undefined, requestOrigin)
+  return buildAbsoluteHttpsUrl(baseUrl, key)
 }
 
 /**

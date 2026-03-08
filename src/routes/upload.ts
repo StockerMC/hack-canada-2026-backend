@@ -1,5 +1,6 @@
 import { Hono } from "hono"
 import type { Env } from "../types"
+import { buildAbsoluteHttpsUrl, resolvePublicApiBaseUrl, resolvePublicVideoBaseUrl } from "../lib/urls"
 
 export function uploadRoutes() {
   const app = new Hono<{ Bindings: Env }>()
@@ -8,19 +9,41 @@ export function uploadRoutes() {
   app.post("/", async (c) => {
     const videoId = crypto.randomUUID()
     const key = `clips/${videoId}.mp4`
+    const requestOrigin = new URL(c.req.url).origin
+    const publicApiBaseUrl = resolvePublicApiBaseUrl(c.env.PUBLIC_API_BASE_URL, requestOrigin)
+    const publicVideoBaseUrl = resolvePublicVideoBaseUrl(
+      c.env.PUBLIC_VIDEO_BASE_URL,
+      c.env.PUBLIC_API_BASE_URL,
+      requestOrigin
+    )
 
-    // Create a presigned URL for direct upload to R2
-    // Note: R2 presigned URLs require using the S3 API compatibility
-    // For now, we'll return the key and have the client upload via a PUT to our endpoint
-    const uploadUrl = new URL(`/upload/${key}`, c.req.url).toString()
+    // Use backend-controlled absolute HTTPS URLs for both upload and playback paths.
+    const uploadUrl = buildAbsoluteHttpsUrl(publicApiBaseUrl, `upload/${key}`)
+    const videoUrl = buildAbsoluteHttpsUrl(publicVideoBaseUrl, key)
 
     return c.json({
       upload_url: uploadUrl,
       video_id: videoId,
       key: key,
-      // URL where the video will be accessible after upload
-      video_url: `https://videos.clipstakes.app/${key}`,
+      video_url: videoUrl,
     })
+  })
+
+  // GET /upload/:key+ - Public playback endpoint backed by R2
+  app.get("/:key{.+}", async (c) => {
+    const key = c.req.param("key")
+    const object = await c.env.VIDEOS.get(key)
+
+    if (!object) {
+      return c.json({ error: "Video not found" }, 404)
+    }
+
+    const headers = new Headers()
+    object.writeHttpMetadata(headers)
+    headers.set("ETag", object.httpEtag)
+    headers.set("Cache-Control", "public, max-age=31536000, immutable")
+
+    return new Response(object.body, { headers })
   })
 
   // PUT /upload/:key+ - Direct upload endpoint (proxies to R2)

@@ -95,15 +95,15 @@ export class RewardsService {
   }
 
   async syncWalletPass(userId: string, wallet: CreatorWallet): Promise<CreatorWallet> {
-    const balances = await this.db.getRewardBalances(userId)
+    return this.syncWalletPassWithOrigin(userId, wallet)
+  }
 
-    const passUrl = await this.walletWalletService.createOrUpdatePassForWallet({
-      walletCode: wallet.wallet_code,
-      qrPayload: wallet.qr_payload,
-      userId,
-      balanceCents: balances.available_cents,
-      existingPassUrl: wallet.pass_url,
-    })
+  async syncWalletPassWithOrigin(
+    userId: string,
+    wallet: CreatorWallet,
+    requestOrigin?: string
+  ): Promise<CreatorWallet> {
+    const passUrl = this.walletWalletService.getPassUrl(wallet.wallet_code, requestOrigin)
 
     if (!passUrl || passUrl === wallet.pass_url) {
       return wallet
@@ -113,12 +113,12 @@ export class RewardsService {
     return updated ?? { ...wallet, pass_url: passUrl }
   }
 
-  async getWalletAndBalances(userId: string): Promise<{
+  async getWalletAndBalances(userId: string, requestOrigin?: string): Promise<{
     wallet: WalletResponse
     balances: BalancesResponse
   }> {
     const wallet = await this.ensureWallet(userId)
-    const syncedWallet = await this.syncWalletPass(userId, wallet)
+    const syncedWallet = await this.syncWalletPassWithOrigin(userId, wallet, requestOrigin)
     const balances = await this.getBalances(userId)
 
     return {
@@ -127,13 +127,13 @@ export class RewardsService {
     }
   }
 
-  async getWalletSummary(userId: string, transactionLimit = 20): Promise<{
+  async getWalletSummary(userId: string, transactionLimit = 20, requestOrigin?: string): Promise<{
     wallet: WalletResponse
     balances: BalancesResponse
     transactions: RewardTransactionResponse[]
   }> {
     const wallet = await this.ensureWallet(userId)
-    const syncedWallet = await this.syncWalletPass(userId, wallet)
+    const syncedWallet = await this.syncWalletPassWithOrigin(userId, wallet, requestOrigin)
     const [balances, transactions] = await Promise.all([
       this.getBalances(userId),
       this.getTransactions(userId, transactionLimit),

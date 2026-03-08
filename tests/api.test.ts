@@ -29,7 +29,8 @@ function createMockEnv(overrides: Partial<Env> = {}): Env {
     WALLET_CERT_PASSWORD: undefined,
     WALLETWALLET_API_KEY: undefined,
     WALLETWALLET_BASE_URL: "https://walletwallet.example",
-    WALLETWALLET_TEMPLATE_ID: undefined,
+    PUBLIC_API_BASE_URL: "https://api.example",
+    PUBLIC_VIDEO_BASE_URL: undefined,
     ...overrides,
   }
 }
@@ -66,7 +67,7 @@ async function createClipWithReceipt(
       body: JSON.stringify({
         receipt_id: receipt.id,
         product_id: productId,
-        video_url: "https://videos.clipstakes.app/clips/new.mp4",
+        video_url: "https://clipstakes.skilled5041.workers.dev/upload/clips/new.mp4",
       }),
     },
     env
@@ -119,7 +120,7 @@ describe("Wallet ledger API", () => {
         body: JSON.stringify({
           receipt_id: receipt.id,
           product_id: "product-123",
-          video_url: "https://videos.clipstakes.app/clips/new.mp4",
+          video_url: "https://clipstakes.skilled5041.workers.dev/upload/clips/new.mp4",
         }),
       },
       env
@@ -131,6 +132,9 @@ describe("Wallet ledger API", () => {
     expect(firstBody.reward.reason).toBe("clip_published")
     expect(firstBody.balances.available_cents).toBe(500)
     expect(firstBody.wallet.wallet_code).toMatch(/^CLIP-/)
+    expect(firstBody.wallet.pass_url).toBe(
+      `https://api.example/wallet/${firstBody.wallet.wallet_code as string}/pass`
+    )
 
     const second = await app.request(
       "/clips",
@@ -143,7 +147,7 @@ describe("Wallet ledger API", () => {
         body: JSON.stringify({
           receipt_id: receipt.id,
           product_id: "product-123",
-          video_url: "https://videos.clipstakes.app/clips/new-2.mp4",
+          video_url: "https://clipstakes.skilled5041.workers.dev/upload/clips/new-2.mp4",
         }),
       },
       env
@@ -352,11 +356,55 @@ describe("Wallet ledger API", () => {
     const body = await response.json()
 
     expect(body.wallet.wallet_code).toBe(walletCode)
+    expect(body.wallet.pass_url).toBe(`https://api.example/wallet/${walletCode}/pass`)
     expect(body.balances.available_cents).toBe(1000)
     expect(body.balances.lifetime_earned_cents).toBe(1000)
     expect(Array.isArray(body.transactions)).toBe(true)
     expect(body.transactions.length).toBeGreaterThanOrEqual(2)
     expect(body.transactions[0]).toHaveProperty("amount_display")
+  })
+
+  test("wallet pass_url uses PUBLIC_API_BASE_URL even without WalletWallet API key", async () => {
+    const db = createInMemoryDb()
+    const app = buildApp(db)
+    const env = createMockEnv({
+      PUBLIC_API_BASE_URL: "https://api.clipstakes.app",
+    })
+
+    const receipt = await db.createReceipt(["product-pass-url"])
+    const clipResponse = await app.request(
+      "/clips",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Device-ID": "device-pass-url",
+        },
+        body: JSON.stringify({
+          receipt_id: receipt.id,
+          product_id: "product-pass-url",
+          video_url: "https://clipstakes.skilled5041.workers.dev/upload/clips/pass-url.mp4",
+        }),
+      },
+      env
+    )
+
+    expect(clipResponse.status).toBe(201)
+    const clipBody = await clipResponse.json()
+    const walletCode = clipBody.wallet.wallet_code as string
+    expect(clipBody.wallet.pass_url).toBe(`https://api.clipstakes.app/wallet/${walletCode}/pass`)
+  })
+
+  test("/wallet/:walletCode/pass returns pkpass when WalletWallet is not configured", async () => {
+    const db = createInMemoryDb()
+    const app = buildApp(db)
+    const env = createMockEnv()
+
+    const { walletCode } = await createClipWithReceipt(app, env, db, "device-pass-endpoint", "product-1")
+
+    const response = await app.request(`/wallet/${walletCode}/pass`, { method: "GET" }, env)
+    expect(response.status).toBe(200)
+    expect(response.headers.get("Content-Type")).toContain("application/vnd.apple.pkpass")
   })
 
   test("/wallet/redeem debits balance, is idempotent, and blocks overdraft", async () => {
@@ -382,6 +430,7 @@ describe("Wallet ledger API", () => {
 
     const redeemBody = await redeem.json()
     expect(redeem.status).toBe(200)
+    expect(redeemBody.wallet.pass_url).toBe(`https://api.example/wallet/${walletCode}/pass`)
     expect(redeemBody.balances.available_cents).toBe(200)
 
     const redeemRetry = await app.request(
@@ -401,6 +450,7 @@ describe("Wallet ledger API", () => {
     const retryBody = await redeemRetry.json()
     expect(redeemRetry.status).toBe(200)
     expect(retryBody.idempotent).toBe(true)
+    expect(retryBody.wallet.pass_url).toBe(`https://api.example/wallet/${walletCode}/pass`)
     expect(retryBody.balances.available_cents).toBe(200)
 
     const overdraft = await app.request(
@@ -482,6 +532,9 @@ describe("Upload aliases", () => {
     const uploadBody = await uploadResponse.json()
     const uploadUrlBody = await uploadUrlResponse.json()
     expect(uploadBody).toHaveProperty("upload_url")
+    expect(uploadBody).toHaveProperty("video_url")
     expect(uploadUrlBody).toHaveProperty("upload_url")
+    expect((uploadBody.upload_url as string).startsWith("https://")).toBe(true)
+    expect((uploadBody.video_url as string).startsWith("https://")).toBe(true)
   })
 })

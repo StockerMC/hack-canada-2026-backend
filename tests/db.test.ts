@@ -11,7 +11,7 @@ describe("DB wallet-ledger primitives", () => {
       user_id: user.id,
       receipt_id: receipt.id,
       product_id: "product-1",
-      video_url: "https://videos.clipstakes.app/clips/new.mp4",
+      video_url: "https://clipstakes.skilled5041.workers.dev/upload/clips/new.mp4",
       reward_cents: 500,
     })
 
@@ -19,7 +19,7 @@ describe("DB wallet-ledger primitives", () => {
       user_id: user.id,
       receipt_id: receipt.id,
       product_id: "product-1",
-      video_url: "https://videos.clipstakes.app/clips/new-2.mp4",
+      video_url: "https://clipstakes.skilled5041.workers.dev/upload/clips/new-2.mp4",
       reward_cents: 500,
     })
 
@@ -38,7 +38,7 @@ describe("DB wallet-ledger primitives", () => {
     const clipCreation = await db.createClipAndReward({
       user_id: user.id,
       product_id: "product-1",
-      video_url: "https://videos.clipstakes.app/clips/clip.mp4",
+      video_url: "https://clipstakes.skilled5041.workers.dev/upload/clips/clip.mp4",
       reward_cents: 500,
     })
 
@@ -74,7 +74,7 @@ describe("DB wallet-ledger primitives", () => {
     const clipCreation = await db.createClipAndReward({
       user_id: user.id,
       product_id: "product-1",
-      video_url: "https://videos.clipstakes.app/clips/clip.mp4",
+      video_url: "https://clipstakes.skilled5041.workers.dev/upload/clips/clip.mp4",
       reward_cents: 500,
     })
 
@@ -105,7 +105,7 @@ describe("DB wallet-ledger primitives", () => {
     await db.createClipAndReward({
       user_id: user.id,
       product_id: "product-1",
-      video_url: "https://videos.clipstakes.app/clips/clip.mp4",
+      video_url: "https://clipstakes.skilled5041.workers.dev/upload/clips/clip.mp4",
       reward_cents: 500,
     })
 
