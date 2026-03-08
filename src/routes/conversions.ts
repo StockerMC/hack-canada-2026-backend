@@ -55,6 +55,7 @@ export function conversionsRoutes(db: Db) {
   const app = new Hono<{ Bindings: Env }>()
 
   app.post("/", async (c) => {
+    const requestOrigin = new URL(c.req.url).origin
     const signature = c.req.header("X-Shopify-Hmac-Sha256")
     if (!signature) {
       return c.json({ error: "Missing signature" }, 401)
@@ -84,7 +85,7 @@ export function conversionsRoutes(db: Db) {
     }
 
     const { conversionService, rewardsService } = getServices(db, c.env)
-    const result = await conversionService.processConversionForClip(clipId, orderId, c.env)
+    const result = await conversionService.processConversionForClip(clipId, orderId, c.env, requestOrigin)
 
     if (result.status === "clip_not_found") {
       return c.json({ error: "Clip not found" }, 404)
@@ -94,6 +95,7 @@ export function conversionsRoutes(db: Db) {
   })
 
   app.post("/dev", async (c) => {
+    const requestOrigin = new URL(c.req.url).origin
     let body: unknown
     try {
       body = await c.req.json()
@@ -110,7 +112,8 @@ export function conversionsRoutes(db: Db) {
     const result = await conversionService.processConversionForClip(
       parsed.data.clip_id,
       parsed.data.order_id,
-      c.env
+      c.env,
+      requestOrigin
     )
 
     if (result.status === "clip_not_found") {

@@ -30,7 +30,8 @@ export class ConversionService {
   async processConversionForClip(
     clipId: string,
     orderId: string,
-    env: Env
+    env: Env,
+    requestOrigin?: string
   ): Promise<ProcessConversionResult> {
     const result = await this.db.processConversionReward({
       clip_id: clipId,
@@ -60,7 +61,7 @@ export class ConversionService {
     }
 
     const wallet = await this.rewardsService.ensureWallet(result.creator_user_id)
-    await this.rewardsService.syncWalletPass(result.creator_user_id, wallet)
+    await this.rewardsService.syncWalletPassWithOrigin(result.creator_user_id, wallet, requestOrigin)
 
     const balances = await this.rewardsService.getBalances(result.creator_user_id)
 
