@@ -499,7 +499,7 @@ describe("Wallet ledger API", () => {
     expect(zip.file("logo@2x.png")).toBeTruthy()
   })
 
-  test("/wallet/:walletCode/pass returns JSON error when local signing is not configured", async () => {
+  test("/wallet/:walletCode/pass returns JSON error when WalletWallet is not configured", async () => {
     const db = createInMemoryDb()
     const app = buildApp(db)
     const env = createMockEnv()
@@ -517,8 +517,84 @@ describe("Wallet ledger API", () => {
     expect(response.headers.get("Content-Type")).toContain("application/json")
 
     const body = await response.json()
-    expect(body.error).toBe("Wallet pass signing not configured")
+    expect(body.error).toBe("WalletWallet is not configured")
     expect(Array.isArray(body.missing)).toBe(true)
+    expect(body.missing).toContain("WALLETWALLET_API_KEY")
+  })
+
+  test("/wallet/:walletCode/pass returns 502 when WalletWallet returns non-zip payload", async () => {
+    const db = createInMemoryDb()
+    const app = buildApp(db)
+    const env = createMockEnv({
+      WALLETWALLET_API_KEY: "walletwallet-test-key",
+    })
+
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        })
+      )
+    ) as unknown as typeof fetch
+
+    const { walletCode } = await createClipWithReceipt(
+      app,
+      env,
+      db,
+      "device-pass-walletwallet-invalid",
+      "product-1"
+    )
+
+    const response = await app.request(`/wallet/${walletCode}/pass`, { method: "GET" }, env)
+    expect(response.status).toBe(502)
+    expect(response.headers.get("Content-Type")).toContain("application/json")
+
+    const body = await response.json()
+    expect(body.error).toBe("WalletWallet failed to generate a valid pkpass")
+  })
+
+  test("/wallet/:walletCode/pass accepts WalletWallet zip payload with generic content-type", async () => {
+    const db = createInMemoryDb()
+    const app = buildApp(db)
+    const env = createMockEnv({
+      WALLETWALLET_API_KEY: "walletwallet-test-key",
+    })
+
+    const providerZip = new JSZip()
+    providerZip.file("pass.json", JSON.stringify({ provider: "walletwallet" }))
+    const providerBytes = await providerZip.generateAsync({ type: "uint8array" })
+
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response(providerBytes, {
+          status: 200,
+          headers: {
+            "Content-Type": "application/octet-stream",
+          },
+        })
+      )
+    ) as unknown as typeof fetch
+
+    const { walletCode } = await createClipWithReceipt(
+      app,
+      env,
+      db,
+      "device-pass-walletwallet-zip",
+      "product-1"
+    )
+
+    const response = await app.request(`/wallet/${walletCode}/pass`, { method: "GET" }, env)
+    expect(response.status).toBe(200)
+    expect(response.headers.get("Content-Type")).toContain("application/vnd.apple.pkpass")
+
+    const body = new Uint8Array(await response.arrayBuffer())
+    expect(body[0]).toBe(0x50)
+    expect(body[1]).toBe(0x4b)
+    expect(body[2]).toBe(0x03)
+    expect(body[3]).toBe(0x04)
   })
 
   test("/wallet/redeem debits balance, is idempotent, and blocks overdraft", async () => {

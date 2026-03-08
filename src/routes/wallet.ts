@@ -29,6 +29,15 @@ function walletLedgerUnavailable(c: Context<{ Bindings: Env }>) {
   )
 }
 
+function hasLocalWalletSigningConfig(env: Env): boolean {
+  return Boolean(
+    env.WALLET_PASS_TYPE_ID &&
+      env.WALLET_TEAM_ID &&
+      env.WALLET_CERT &&
+      env.WALLET_WWDR_CERT
+  )
+}
+
 async function ensureWalletPassUrl(
   db: Db,
   walletWalletService: WalletWalletService,
@@ -183,16 +192,33 @@ export function walletRoutes(db: Db) {
       })
 
       if (!pkpass) {
-        pkpass = await generatePkpass(syncedWallet.wallet_code, balances.available_cents, {
-          passTypeId: c.env.WALLET_PASS_TYPE_ID ?? "",
-          teamId: c.env.WALLET_TEAM_ID ?? "",
-          cert: c.env.WALLET_CERT ?? "",
-          certPassword: c.env.WALLET_CERT_PASSWORD ?? "",
-          wwdrCert: c.env.WALLET_WWDR_CERT,
-          organizationName: c.env.WALLET_ORGANIZATION_NAME,
-          description: c.env.WALLET_PASS_DESCRIPTION,
-          logoText: c.env.WALLET_PASS_LOGO_TEXT,
-        })
+        if (hasLocalWalletSigningConfig(c.env)) {
+          pkpass = await generatePkpass(syncedWallet.wallet_code, balances.available_cents, {
+            passTypeId: c.env.WALLET_PASS_TYPE_ID ?? "",
+            teamId: c.env.WALLET_TEAM_ID ?? "",
+            cert: c.env.WALLET_CERT ?? "",
+            certPassword: c.env.WALLET_CERT_PASSWORD ?? "",
+            wwdrCert: c.env.WALLET_WWDR_CERT,
+            organizationName: c.env.WALLET_ORGANIZATION_NAME,
+            description: c.env.WALLET_PASS_DESCRIPTION,
+            logoText: c.env.WALLET_PASS_LOGO_TEXT,
+          })
+        } else if (!walletWalletService.isConfigured()) {
+          return c.json(
+            {
+              error: "WalletWallet is not configured",
+              missing: ["WALLETWALLET_API_KEY"],
+            },
+            503
+          )
+        } else {
+          return c.json(
+            {
+              error: "WalletWallet failed to generate a valid pkpass",
+            },
+            502
+          )
+        }
       }
 
       return new Response(pkpass, {

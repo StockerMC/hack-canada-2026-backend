@@ -60,16 +60,20 @@ export class WalletWalletService {
 
       const contentType = response.headers.get("Content-Type") ?? ""
       const payload = new Uint8Array(await response.arrayBuffer())
-      if (
-        !contentType.toLowerCase().includes("application/vnd.apple.pkpass") ||
-        !isZipArchive(payload)
-      ) {
+      if (!isZipArchive(payload)) {
         console.error("WalletWallet returned non-pkpass payload", {
           walletCode: input.walletCode,
           contentType,
           size: payload.byteLength,
         })
         return null
+      }
+
+      if (!contentType.toLowerCase().includes("application/vnd.apple.pkpass")) {
+        console.warn("WalletWallet returned pkpass bytes with non-standard content-type", {
+          walletCode: input.walletCode,
+          contentType,
+        })
       }
 
       return payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength)
